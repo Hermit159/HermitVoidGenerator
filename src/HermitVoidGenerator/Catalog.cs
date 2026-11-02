@@ -14,6 +14,7 @@ namespace HermitVoidGenerator
         private static readonly Dictionary<string, string> names = new Dictionary<string, string>();
         private static Dictionary<string, int[]> groupOf;
         private static readonly Dictionary<string, Sprite> icons = new Dictionary<string, Sprite>();
+        private static readonly Dictionary<string, string> descs = new Dictionary<string, string>();
 
         // 两级分类：wiki 大分类（17 个）→ 小分类（42 个）。一件物品可以挂在多个小分类下。
         public const string SectionAll = "全部大类";
@@ -379,13 +380,24 @@ namespace HermitVoidGenerator
         /// <summary>按当前搜索词统计每个小分类里有几件。长度同 GroupLabels，[0] 是全部。</summary>
         public static int[] GroupCounts(string text)
         {
+            return GroupCounts(null, text);
+        }
+
+        /// <summary>同上，但只数 subset 里的 id（null = 整个目录）。编辑页只数台面上那几件。</summary>
+        public static int[] GroupCounts(IList<string> subset, string text)
+        {
             Ensure();
             Dictionary<string, int[]> map = GroupMap();
             int[] counts = new int[groupLabels.Count];
             string filter = (text ?? "").Trim();
-            for (int i = 0; i < ids.Count; i++)
+            int total = subset == null ? ids.Count : subset.Count;
+            for (int i = 0; i < total; i++)
             {
-                string id = ids[i];
+                string id = subset == null ? ids[i] : subset[i];
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
                 if (filter.Length > 0 && !Matches(id, filter))
                 {
                     continue;
@@ -411,14 +423,25 @@ namespace HermitVoidGenerator
         /// <summary>按当前搜索词统计每个大分类里有几件。长度同 SectionLabels，[0] 是全部。</summary>
         public static int[] SectionCounts(string text)
         {
+            return SectionCounts(null, text);
+        }
+
+        /// <summary>同上，但只数 subset 里的 id（null = 整个目录）。</summary>
+        public static int[] SectionCounts(IList<string> subset, string text)
+        {
             Ensure();
             Dictionary<string, int[]> map = GroupMap();
             int[] counts = new int[sectionLabels.Count];
             string filter = (text ?? "").Trim();
+            int total = subset == null ? ids.Count : subset.Count;
             List<int> seen = new List<int>();
-            for (int i = 0; i < ids.Count; i++)
+            for (int i = 0; i < total; i++)
             {
-                string id = ids[i];
+                string id = subset == null ? ids[i] : subset[i];
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
                 if (filter.Length > 0 && !Matches(id, filter))
                 {
                     continue;
@@ -475,6 +498,25 @@ namespace HermitVoidGenerator
                 }
             }
             return false;
+        }
+
+        /// <summary>单个 id 是否命中当前筛选（搜索词 + 大类 / 小类）。编辑页只有台面上那几件，逐件过比整目录筛便宜。</summary>
+        public static bool InFilter(string id, string text, int sectionIndex, int groupIndex)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return false;
+            }
+            string filter = (text ?? "").Trim();
+            if (sectionIndex > 0 || groupIndex > 0)
+            {
+                int[] groups;
+                if (!GroupMap().TryGetValue(id, out groups) || !Hit(groups, sectionIndex, groupIndex))
+                {
+                    return false;
+                }
+            }
+            return filter.Length == 0 || Matches(id, filter);
         }
 
         /// <summary>取显示名。走游戏自己的缓存；游戏只给英文名时用本地词素表再兜一层。</summary>
@@ -560,6 +602,7 @@ namespace HermitVoidGenerator
             try
             {
                 probe = DirectoryMaster.Create<GameItem>(id);
+                descs[id] = ProbeDesc(probe);
                 GameItemElement element = probe as GameItemElement;
                 if (element != null && element.background != null && element.background.image != null)
                 {
@@ -600,9 +643,61 @@ namespace HermitVoidGenerator
             return sprite;
         }
 
+        /// <summary>取游戏原本的物品描述（shortDescription + flavorText）。只在 IconOf 造探针时顺手抓，不额外造实例。</summary>
+        public static string DescOf(string id)
+        {
+            string desc;
+            if (!string.IsNullOrEmpty(id) && descs.TryGetValue(id, out desc))
+            {
+                return desc ?? "";
+            }
+            return "";
+        }
+
+        /// <summary>从探针上读游戏原文描述。读不到就返回空串，不阻塞 UI。</summary>
+        private static string ProbeDesc(GameItem probe)
+        {
+            if (probe == null)
+            {
+                return "";
+            }
+
+            string desc = "";
+            string flavor = "";
+            try
+            {
+                desc = probe.shortDescription ?? "";
+            }
+            catch
+            {
+                desc = "";
+            }
+            try
+            {
+                flavor = probe.flavorText ?? "";
+            }
+            catch
+            {
+                flavor = "";
+            }
+
+            desc = desc.Trim();
+            flavor = flavor.Trim();
+            if (flavor.Length == 0 || flavor == desc)
+            {
+                return desc;
+            }
+            if (desc.Length == 0)
+            {
+                return flavor;
+            }
+            return desc + "\n" + flavor;
+        }
+
         public static void ClearCaches()
         {
             icons.Clear();
+            descs.Clear();
             names.Clear();
             groupOf = null;
         }

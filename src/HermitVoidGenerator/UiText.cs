@@ -68,6 +68,9 @@ namespace HermitVoidGenerator
         public const string RefreshStore = "刷新台面";
         public const string NoTarget = "未选中物品 —— 在左边点一件，或者用「点选物品」在世界里点。";
         public const string NoStoreItems = "（前台、后柜台、展示柜上都没有东西）";
+        public const string EditSearchHint = "在台面物品里按 ID / 名称筛…";
+        public const string EditEmptyList = "台面上没有匹配的物品。换个关键词，或者把大/小分类切回全部。";
+        public const string EditListHint = "左键点一件 → 右侧改它";
         public const string EmptyItemTitle = "还没有选中物品";
         public const string EditTitle = "物品信息";
         public const string BlankClears = "空白字段=清空";
@@ -115,6 +118,28 @@ namespace HermitVoidGenerator
         public const string UpPrinter = "制瓶机";
         public const string UpConverter = "电流转换器";
         public const string UpBattery = "高科电池输出";
+
+        // ---- 种子基因
+        public const string GeneTitle = "种子基因";
+        public const string GenePlant = "品种";
+        public const string GenePure = "原种";
+        public const string GeneModified = "已变异";
+        public const string GeneComplexity = "复杂度";
+        public const string GeneHeat = "基因热量";
+        public const string GeneEffective = "有效复杂度";
+        public const string GeneHint = "等级 0 = 去掉这个性状；填几级就是几级，加成按等级折算。带「受限」的性状游戏本体不让加，强加会直接写进槽里。";
+        public const string GeneOwned = "已有性状";
+        public const string GeneOwnedNone = "（身上没有任何性状，可能不是正常长出来的种子）";
+        public const string GeneMissing = "未拥有性状";
+        public const string GeneBlockedMark = "（受限）";
+        public const string GeneWrite = "写入";
+        public const string GeneAdd = "加入";
+        public const string GeneForce = "强加";
+        public const string GeneReset = "恢复原种";
+        public const string GeneClearHeat = "清空热量";
+        public const string GeneRankPlaceholder = "等级";
+        public const string GeneLimitUnlimited = "游戏内无等级上限";
+        public const string GeneRestricted = "受限原因：";
 
         // ---- 基础修改页
         public const string BasicMoney = "钱与账目";

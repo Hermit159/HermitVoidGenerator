@@ -241,13 +241,20 @@ namespace HermitVoidGenerator
             return GroupOther;
         }
 
-        /// <summary>物品身上带着、但类型未知（扫描时没读到过）的词条，只读展示。</summary>
+        /// <summary>
+        /// 物品身上带着、但类型未知（扫描时没读到过）的词条，只读展示。
+        /// PLANT_TRAIT_* 不算在内：那是种子基因，归「种子基因」区管。
+        /// </summary>
         public static List<string> Unrated(GameItem item)
         {
             List<string> list = new List<string>();
             foreach (string tag in Keys(item))
             {
                 if (string.IsNullOrEmpty(tag) || TagTypes.Kind(tag) != '\0')
+                {
+                    continue;
+                }
+                if (tag.StartsWith(Genes.TraitTagPrefix, StringComparison.Ordinal))
                 {
                     continue;
                 }
