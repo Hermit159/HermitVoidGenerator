@@ -1,8 +1,6 @@
 # Hermit's Void Generator
 
-Hermit的虚空生成器 —— **Probably Stolen** 的原生 mod，走游戏自带 ModLoader，不依赖 BepInEx。作者 **Hermit**，版本 **1.0.5**。
-
-游戏内显示中文名「Hermit的虚空生成器」；工程、程序集、目录、ID 一律用英文 `HermitVoidGenerator`。
+Hermit的虚空生成器 —— **Probably Stolen** 的原生 mod。作者 **Hermit**，版本 **1.0.5**。
 
 ## 功能
 
