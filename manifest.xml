@@ -3,7 +3,7 @@
   <ID>yg.hermit_void_generator</ID>
   <Name>Hermit的虚空生成器</Name>
   <Author>Hermit</Author>
-  <ModVersion>1.0.5</ModVersion>
+  <ModVersion>1.0.6</ModVersion>
   <Description>基础修改：现金、房租、贷款、吸引力、定价加成、六阵营声望、恩惠、配给券余额、伤势一键改；物品添加：凭空生成任意物品，数量、落点、纯度、耐久、升级等级、词条、种子基因随意指定，悬停格子看游戏原文描述；物品编辑：按关键词与两级分类筛出台面已有物品，改写数量、价格、规格、种子基因与词条，可复制一件。</Description>
   <GameVersions>
     <Version>1.0</Version>

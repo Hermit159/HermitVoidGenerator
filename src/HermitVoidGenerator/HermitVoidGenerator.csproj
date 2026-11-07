@@ -5,14 +5,14 @@
     <AssemblyName>HermitVoidGenerator</AssemblyName>
     <RootNamespace>HermitVoidGenerator</RootNamespace>
     <LangVersion>9.0</LangVersion>
-    <Version>1.0.0</Version>
+    <Version>1.0.6</Version>
     <Deterministic>true</Deterministic>
     <DebugType>none</DebugType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
     <NoWarn>CS0436;CS1701;CS1702</NoWarn>
-    <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\Probably Stolen_Data\Managed</GameManagedDir>
+    <GameManagedDir Condition="'$(GameManagedDir)' == ''">E:\SteamLibrary\steamapps\common\Probably Stolen\Probably Stolen_Data\Managed</GameManagedDir>
   </PropertyGroup>
 
   <ItemGroup>

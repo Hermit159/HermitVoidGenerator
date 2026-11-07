@@ -167,6 +167,31 @@ namespace HermitVoidGenerator
         public const string BasicRefresh = "刷新数值";
         public const string BasicHint = "这些是存档里的全局数值，写入立刻生效。声望范围 -200 到 200，改完立刻按游戏自己的档位重算阵营特权（每个阵营的 perk 按阈值解锁/锁回）。伤势 0 到 10，5 以上算重伤：重伤会掉行动能力，稳定状态决定夜里是愈合还是继续恶化。";
 
+        // ---- 事件
+        public const string BasicEvent = "事件";
+        public const string BasicEventPick = "事件";
+        public const string BasicEventDays = "持续(天)";
+        public const string BasicEventTrigger = "触发";
+        public const string BasicEventRefresh = "刷新状态";
+        public const string BasicEventDaysHint = "事件持续几天。留空就用默认天数。";
+        public const string BasicEventNoPick = "选一个事件，简介和价格影响会写在这里。";
+        public const string BasicEventNoSummary = "（游戏没给这个事件写简介）";
+        public const string BasicEventEffects = "价格影响：";
+        public const string BasicEventNoEffects = "没有价格影响";
+        public const string BasicEventActive = "日历上正在进行：";
+        public const string BasicEventNothing = "日历上现在没有事件";
+        public const string BasicEventNoSave = "得先读档进店";
+        public const string BasicEventTriggered = "已触发：";
+        public const string BasicEventRestarted = "已重新计时：";
+        public const string BasicEventBadDays = "天数填数字，1 到 365";
+        public const string BasicEventPermanent = "这个事件不会自己结束，填的天数不起作用。";
+        public const string BasicEventLockdownNote = "会让全站进入封锁。";
+        public const string BasicEventPerkNote = "（这个档开了不订报纸的天赋，日历上只显示房租、房贷这类例行事件）";
+
+        // ---- 顶栏 / 状态栏
+        public const string HintGlobal = "Ins 开关面板 · 拖标题栏移动";
+        public const string StatusReady = "就绪";
+
         public static readonly string[] SpawnTargets = { "店内库存", "前台柜台", "展示柜", "后柜台", "自动安置" };
     }
 }

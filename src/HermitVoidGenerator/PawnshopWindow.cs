@@ -10,34 +10,50 @@ using UnityEngine.UI;
 namespace HermitVoidGenerator
 {
     /// <summary>「Hermit的虚空生成器」主面板：无中生有（生成）+ 物品编辑。</summary>
-    internal static class PawnshopWindow
+    internal static partial class PawnshopWindow
     {
         private const string WindowId = "yg_deep_space_pawnshop_window";
+
+        // ---- 窗口尺寸：1240 宽时 contentRoot 实测 1224、页区 1216（见 Player.log 布局 dump）
+        //      两张卡按 754 + 8 + 450 = 1212 排，留 4px 余量；卡片不再带 flexibleWidth，禁止被布局压缩
         private const float WinW = 1240f;
-        private const float WinH = 800f;
-        private const float LeftW = 716f;
-        private const float RightW = 424f;
-        private const float PaneH = 706f;
-        private const float InnerW = 390f;
+        private const float WinH = 848f;
+        private const float LeftW = 754f;
+        private const float RightW = 450f;
+        private const float InnerW = 400f;
+
+        // 面板内边距（四边同值），左右栏的内容宽度都按它算出来
+        private const float Pad = 12f;
+        private const float LeftInner = LeftW - Pad * 2f;
+        private const float RightInner = RightW - Pad * 2f;
+        private const float Gap = 8f;
 
         private const int GridColumns = 4;
-        private const float CellW = 166f;
-        private const float CellH = 112f;
-        private const int MaxCells = 180;
+        private const float CellW = 172f;
+        private const float CellH = 126f;
+        private const int MaxCells = 160;
 
-        private static readonly Color CellNormal = new Color(1f, 1f, 1f, 0.08f);
-        private static readonly Color CellSelected = new Color(1f, 0.78f, 0.30f, 0.95f);
-        private static readonly Color CellGlow = new Color(1f, 0.78f, 0.30f, 0.22f);
-        private static readonly Color IconDim = new Color(1f, 1f, 1f, 0.55f);
-        private static readonly Color StatusColor = new Color(0.86f, 0.84f, 0.72f, 1f);
-        private static readonly Color DimColor = new Color(0.72f, 0.70f, 0.62f, 1f);
+        private static readonly Color DimColor = new Color(0.604f, 0.580f, 0.651f, 1f);
 
         private static CustomUIWindow window;
+
+        /// <summary>所有左侧/右侧主卡片。布局稳定后按卡片实测内宽回收子元素宽度，兜住一切越界。</summary>
+        private static readonly List<CustomUIElement> cards = new List<CustomUIElement>();
+
+        /// <summary>首次打开时打一次内容树，之后不再刷日志。</summary>
+        private static bool dumpOnce = true;
+
+        // ---- 外壳：页签 + 状态栏
+        private static readonly List<CustomUIElement> tabButtons = new List<CustomUIElement>();
+        private static readonly List<Image> tabUnderlines = new List<Image>();
+        private static readonly List<RectTransform> pageRoots = new List<RectTransform>();
+        private static CustomUIElement statusText;
+        private static Image statusDot;
+        private static int activeTab;
 
         // ---- 生成页
         private static RectTransform createGridHost;
         private static RectTransform createSpecHost;
-        private static CustomUIElement createStatus;
         private static CustomUIElement draftTitle;
         private static CustomUIElement draftCount;
         private static CustomUIElement draftPrice;
@@ -71,7 +87,6 @@ namespace HermitVoidGenerator
         private static RectTransform editFormHost;
         private static RectTransform editSpecHost;
         private static CustomUIElement editSpecScroll;
-        private static CustomUIElement editStatus;
         private static CustomUIElement editInfo;
         private static CustomUIElement editIncludeStore;
 
@@ -110,7 +125,13 @@ namespace HermitVoidGenerator
         private static CustomUIElement bWoundStable;
         private static CustomUIElement bFavor;
         private static CustomUIElement bCommissaryCred;
-        private static CustomUIElement basicStatus;
+        // ---- 事件触发
+        private static CustomUIElement bEventPick;
+        private static CustomUIElement bEventDays;
+        private static CustomUIElement bEventInfo;
+        private static CustomUIElement bEventLive;
+        private static List<EventCatalog.Entry> eventEntries;
+        private static int eventIndex;
         private static readonly Dictionary<string, CustomUIElement> facInputs = new Dictionary<string, CustomUIElement>();
         private static readonly Dictionary<string, CustomUIElement> facTiers = new Dictionary<string, CustomUIElement>();
         private static int woundIndex;
@@ -125,6 +146,7 @@ namespace HermitVoidGenerator
             public string Id;
             public CustomUIElement Image;
             public CustomUIElement Label;
+            public CellClickHandler Handler;
         }
 
         // ================= 对外入口 =================
@@ -183,23 +205,24 @@ namespace HermitVoidGenerator
             }
         }
 
+        /// <summary>三个页面共用一个底部状态条，同一句提示不再各说一遍。</summary>
         public static void SetStatus(string text)
         {
             string value = text ?? "";
             try
             {
-                if (createStatus != null && createStatus.IsAlive)
+                if (statusText != null && statusText.IsAlive)
                 {
-                    createStatus.SetText(value);
+                    statusText.SetText(value);
+                    statusText.SetTextColor(UiSkin.StatusInk(value));
                 }
-                if (editStatus != null && editStatus.IsAlive)
+                if (statusDot != null)
                 {
-                    editStatus.SetText(value);
+                    statusDot.color = UiSkin.StatusLamp(value);
                 }
             }
             catch
             {
-                // 状态栏没了不影响主流程
             }
         }
 
@@ -258,7 +281,6 @@ namespace HermitVoidGenerator
         {
             createGridHost = null;
             createSpecHost = null;
-            createStatus = null;
             draftTitle = null;
             draftCount = null;
             draftPrice = null;
@@ -267,7 +289,6 @@ namespace HermitVoidGenerator
             editFormHost = null;
             editSpecHost = null;
             editSpecScroll = null;
-            editStatus = null;
             editInfo = null;
             editIncludeStore = null;
             fCount = null;
@@ -290,7 +311,17 @@ namespace HermitVoidGenerator
             bWoundStable = null;
             bFavor = null;
             bCommissaryCred = null;
-            basicStatus = null;
+            bEventPick = null;
+            bEventDays = null;
+            bEventInfo = null;
+            bEventLive = null;
+            eventEntries = null;
+            statusText = null;
+            statusDot = null;
+            tabButtons.Clear();
+            tabUnderlines.Clear();
+            pageRoots.Clear();
+            cards.Clear();
             facInputs.Clear();
             facTiers.Clear();
         }
@@ -358,43 +389,445 @@ namespace HermitVoidGenerator
 
         private static void Build()
         {
-            CustomUIManager manager = CustomUIManager.Instance;
-            if (manager == null)
-            {
-                throw new InvalidOperationException("CustomUIManager 还没准备好");
-            }
+            ClearHosts();
 
             string layer = CustomUIManager.HasLayer(CustomUIManager.LAYER_OVERLAY)
                 ? CustomUIManager.LAYER_OVERLAY
                 : CustomUIManager.LAYER_REAR;
-
             CustomUIBuilder b = CustomUIManager.Window(WindowId, UiText.Title, layer);
-            if (b == null || b.Handle == null)
+            if (b == null)
             {
-                throw new InvalidOperationException("窗口没造出来");
+                Log.Warn("拿不到窗口构建器，放弃建面板");
+                return;
             }
 
             window = b.Handle;
             b.SetSize(WinW, WinH).SetDraggable(true).SetCloseOnEscape(true).OnClose(OnWindowClosed);
+            UiSkin.StyleWindow(window);
 
-            b.BeginTabs();
-            b.BeginTab(UiText.TabBasic);
-            BuildBasicPane(b);
-            b.End();
-            b.BeginTab(UiText.TabCreate);
-            BuildCreatePane(b);
-            b.End();
-            b.BeginTab(UiText.TabEdit);
-            BuildEditPane(b);
-            b.End();
-            b.EndTabs();
+            // 只对齐，不动几何：窗口 prefab 自带的留白要留着
+            RectTransform root = b.CurrentContainer;
+            if (root != null)
+            {
+                UiKit.Align(root, TextAnchor.UpperLeft);
+            }
+
+            BuildTabStrip(b);
+
+            b.AddSpace(8f);
+            UiKit.Rule(b, LeftW + RightW + Gap);
+            b.AddSpace(10f);
+
+            BuildPages(b);
+
+            b.AddSpace(8f);
+            BuildStatusBar(b);
 
             b.Show();
-            if (window != null && window.Rect != null)
+            window.Center();
+            FitWindowToContent();
+            SelectTab(0);
+            UiSkin.Polish(window.ContentRoot);
+            SetStatus(UiText.StatusReady);
+            Log.Info("面板已构建");
+        }
+
+        /// <summary>
+        /// 窗口 prefab 自带留白，实际可用宽度只能量。量出来不够放两张卡就把窗子加宽，
+        /// 让内容永远刚好铺满——比赌一个写死的窗口尺寸可靠。
+        /// </summary>
+        private static void FitWindowToContent()
+        {
+            CustomUIManager mgr = CustomUIManager.Instance;
+            if (mgr == null || !mgr.isActiveAndEnabled)
             {
+                return;
+            }
+            mgr.StartCoroutine(FitWindowCo());
+        }
+
+        private static IEnumerator FitWindowCo()
+        {
+            yield return null;
+            if (window == null || !window.IsAlive)
+            {
+                yield break;
+            }
+
+            RectTransform content = window.ContentRoot;
+            if (content == null)
+            {
+                yield break;
+            }
+
+            LayoutRebuilder.ForceRebuildLayoutImmediate(content);
+
+            // 先量卡片真实内宽，把写死超宽的横排收回来，再谈窗口要不要加宽
+            ClampCards();
+            yield return null;
+            if (window == null || !window.IsAlive)
+            {
+                yield break;
+            }
+            content = window.ContentRoot;
+            if (content == null)
+            {
+                yield break;
+            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(content);
+
+            float share = content.rect.width;
+            float shareH = content.rect.height;
+            float needed = LeftW + Gap + RightW;
+            float neededH = 34f + 8f + 2f + 10f + 790f + 8f + 30f;
+            if (share <= 1f)
+            {
+                Log.Warn("量不到内容宽度，跳过自适应");
+                yield break;
+            }
+
+            Log.Info("内容 " + share.ToString("0.#") + "x" + shareH.ToString("0.#")
+                + "，需要 " + needed.ToString("0.#") + "x" + neededH.ToString("0.#"));
+
+            float addW = needed - share;
+            float addH = neededH - shareH;
+            if (addW > 0.5f || addH > 0.5f)
+            {
+                float widerWin = WinW + (addW > 0f ? addW : 0f);
+                float tallerWin = WinH + (addH > 0f ? addH : 0f);
+                if (tallerWin > 980f)
+                {
+                    tallerWin = 980f;
+                }
+                window.SetSize(widerWin, tallerWin);
                 window.Center();
             }
-            Log.Info("面板已构建");
+
+            yield return null;
+            yield return new WaitForEndOfFrame();
+            if (window == null || !window.IsAlive)
+            {
+                yield break;
+            }
+            ClampCards();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(window.ContentRoot);
+
+            if (dumpOnce)
+            {
+                dumpOnce = false;
+                int budget = 120;
+                Log.Info("=== 内容树 ===");
+                DumpTree(window.ContentRoot, "", 0, 0f, ref budget);
+                Log.Info("=== 内容树结束 剩余预算 " + budget + " ===");
+            }
+        }
+
+        /// <summary>顶栏：三枚页签 + 右侧热键提示。</summary>
+        private static void BuildTabStrip(CustomUIBuilder b)
+        {
+            b.BeginRow(10f, TextAnchor.MiddleLeft);
+            RectTransform strip = b.CurrentContainer;
+            UiKit.Height(strip, 34f);
+            UiKit.FillWidth(strip, 600f);
+
+            AddTabButton(b, UiText.TabBasic, 0);
+            AddTabButton(b, UiText.TabCreate, 1);
+            AddTabButton(b, UiText.TabEdit, 2);
+
+            b.AddFlexibleSpace();
+
+            b.AddLabel(UiText.HintGlobal);
+            CustomUIElement hint = b.Last;
+            if (hint != null)
+            {
+                UiKit.Width(hint, 260f);
+                UiKit.Height(hint, 20f);
+                if (hint.text != null)
+                {
+                    hint.text.text = UiText.HintGlobal;
+                    hint.text.color = UiSkin.Mute;
+                    hint.text.fontSize = 12f;
+                    hint.text.enableAutoSizing = false;
+                    hint.text.enableWordWrapping = false;
+                    hint.text.characterSpacing = 1f;
+                    hint.text.alignment = TextAlignmentOptions.Right;
+                    hint.text.overflowMode = TextOverflowModes.Ellipsis;
+                }
+            }
+
+            b.End();
+        }
+
+        private static void AddTabButton(CustomUIBuilder b, string label, int index)
+        {
+            b.AddButton(label, delegate { SelectTab(index); }, null);
+            CustomUIElement tab = b.Last;
+            if (tab == null)
+            {
+                return;
+            }
+            UiKit.Width(tab, 132f);
+            UiKit.Height(tab, 34f);
+            UiSkin.Tab(tab, index == activeTab);
+            tabButtons.Add(tab);
+            tabUnderlines.Add(UiKit.Underline(tab, UiSkin.Brass));
+        }
+
+        /// <summary>切页：只留一页可见，页签跟着换色，当前页签带一道下划线。</summary>
+        private static void SelectTab(int index)
+        {
+            if (index < 0 || index >= pageRoots.Count)
+            {
+                return;
+            }
+
+            activeTab = index;
+
+            for (int i = 0; i < pageRoots.Count; i++)
+            {
+                RectTransform page = pageRoots[i];
+                if (page != null)
+                {
+                    page.gameObject.SetActive(i == index);
+                }
+            }
+
+            for (int i = 0; i < tabButtons.Count; i++)
+            {
+                CustomUIElement tab = tabButtons[i];
+                if (tab != null && tab.IsAlive)
+                {
+                    UiSkin.Tab(tab, i == index);
+                }
+                if (i < tabUnderlines.Count && tabUnderlines[i] != null)
+                {
+                    tabUnderlines[i].enabled = i == index;
+                }
+            }
+
+            CustomUIManager mgr = CustomUIManager.Instance;
+            if (mgr != null && mgr.isActiveAndEnabled)
+            {
+                Log.Info("=== 布局诊断 tab=" + index + " ===");
+                mgr.StartCoroutine(DumpLayoutCo());
+            }
+        }
+
+        /// <summary>临时诊断：编辑页越界时把关键 rect 的真实尺寸写进日志。</summary>
+        private static IEnumerator DumpLayoutCo()
+        {
+            yield return null;
+            yield return new WaitForEndOfFrame();
+            Log.Info("=== 布局诊断 开始 ===");
+            LogRect("windowRoot", window == null ? null : window.Rect);
+            RectTransform rt = window == null ? null : window.ContentRoot;
+            LogRect("contentRoot", rt);
+            if (rt != null)
+            {
+                for (int i = 0; i < rt.childCount; i++)
+                {
+                    LogRect("  child[" + i + "]", rt.GetChild(i) as RectTransform);
+                }
+            }
+            if (pageRoots.Count > 2)
+            {
+                LogRect("pageEdit", pageRoots[2]);
+            }
+            LogRect("editFormHost", editFormHost);
+            LogRect("editSpecScroll", editSpecScroll == null ? null : editSpecScroll.Rect);
+            if (editSpecScroll != null && editSpecScroll.root != null)
+            {
+                ScrollRect sr = editSpecScroll.root.GetComponent<ScrollRect>();
+                if (sr != null)
+                {
+                    LogRect("  viewport", sr.viewport);
+                    LogRect("  content", sr.content);
+                }
+            }
+            LogRect("editSpecHost", editSpecHost);
+            if (editSpecHost != null)
+            {
+                int n = editSpecHost.childCount < 16 ? editSpecHost.childCount : 16;
+                for (int i = 0; i < n; i++)
+                {
+                    LogRect("    spec[" + i + "]", editSpecHost.GetChild(i) as RectTransform);
+                }
+            }
+            Log.Info("=== 布局诊断 结束 ===");
+        }
+
+        private static void LogRect(string tag, RectTransform t)
+        {
+            if (t == null)
+            {
+                Log.Info(tag + ": null");
+                return;
+            }
+            Rect r = t.rect;
+            Vector3 pos = t.localPosition;
+            LayoutElement le = t.GetComponent<LayoutElement>();
+            string extra = le == null
+                ? "le=-"
+                : "minW=" + le.minWidth.ToString("0.#") + " prefW=" + le.preferredWidth.ToString("0.#") + " flexW=" + le.flexibleWidth.ToString("0.#");
+            Log.Info(tag + ": w=" + r.width.ToString("0.#") + " h=" + r.height.ToString("0.#")
+                + " x=" + pos.x.ToString("0.#") + " px=" + t.pivot.x.ToString("0.##")
+                + " " + extra + " name=" + t.name);
+        }
+
+        /// <summary>
+        /// 兜底：布局稳定后量每张卡片的真实内宽，把所有超宽的 LayoutElement 收回来。
+        /// 卡内表单行宽度是按常量写死的（LeftInner / RightInner / InnerW），一旦面板被压缩或 prefab 留白
+        /// 比预想的大，写死的行就会顶出卡外、连带顶出窗口。这里统一按实测宽度回收，宁可挤一点也不能漏出去。
+        /// </summary>
+        private static void ClampCards()
+        {
+            float narrowest = 0f;
+            for (int i = 0; i < cards.Count; i++)
+            {
+                CustomUIElement el = cards[i];
+                if (el == null || !el.IsAlive || el.Rect == null)
+                {
+                    continue;
+                }
+                float inner = el.Rect.rect.width - Pad * 2f;
+                if (inner < 80f)
+                {
+                    continue;
+                }
+                if (narrowest < 1f || inner < narrowest)
+                {
+                    narrowest = inner;
+                }
+                ClampWidths(el.Rect, inner);
+            }
+            if (narrowest > 1f)
+            {
+                Log.Info("卡片实测内宽最小 " + narrowest.ToString("0.#") + "（预算 LeftInner " + LeftInner.ToString("0.#")
+                    + " / RightInner " + RightInner.ToString("0.#") + " / InnerW " + InnerW.ToString("0.#") + "）");
+            }
+        }
+
+        private static void ClampWidths(RectTransform host, float maxW)
+        {
+            if (host == null)
+            {
+                return;
+            }
+            LayoutElement[] all = host.GetComponentsInChildren<LayoutElement>(true);
+            int fixedCount = 0;
+            for (int i = 0; i < all.Length; i++)
+            {
+                LayoutElement le = all[i];
+                if (le == null)
+                {
+                    continue;
+                }
+                if (le.minWidth > maxW)
+                {
+                    le.minWidth = maxW;
+                    fixedCount++;
+                }
+                if (le.preferredWidth > maxW)
+                {
+                    le.preferredWidth = maxW;
+                }
+            }
+            if (fixedCount > 0)
+            {
+                Log.Warn("回收了 " + fixedCount + " 个超宽元素到 " + maxW.ToString("0.#") + "px");
+            }
+        }
+
+        /// <summary>临时诊断：整棵内容树带路径打印，能一眼看出谁逃出了父容器。</summary>
+        private static void DumpTree(RectTransform t, string path, int depth, float parentW, ref int budget)
+        {
+            if (t == null || budget <= 0 || depth > 5)
+            {
+                return;
+            }
+            budget--;
+            Rect r = t.rect;
+            LayoutElement le = t.GetComponent<LayoutElement>();
+            string extra = le == null
+                ? ""
+                : " minW=" + le.minWidth.ToString("0.#") + " prefW=" + le.preferredWidth.ToString("0.#") + " flexW=" + le.flexibleWidth.ToString("0.#");
+            string flag = parentW > 1f && r.width > parentW + 0.5f ? "  <<< 超出父级" : "";
+            Log.Info("布局 " + path + "/" + t.name + " w=" + r.width.ToString("0.#") + " h=" + r.height.ToString("0.#")
+                + " x=" + t.localPosition.x.ToString("0.#") + extra + flag);
+            for (int i = 0; i < t.childCount; i++)
+            {
+                DumpTree(t.GetChild(i) as RectTransform, path + "/" + t.name, depth + 1, r.width, ref budget);
+            }
+        }
+
+        /// <summary>三页并排叠放，只留一页可见（不用游戏自带的 tabs：它会把当前页签置灰）。</summary>
+        private static void BuildPages(CustomUIBuilder b)
+        {
+            b.BeginColumn(0f, TextAnchor.UpperLeft);
+            RectTransform host = b.CurrentContainer;
+            UiKit.FlexHeight(host, 1f, 790f);
+            UiKit.FlexWidth(host, 1f, 600f);
+
+            AddPage(b, BuildBasicPane);
+            AddPage(b, BuildCreatePane);
+            AddPage(b, BuildEditPane);
+
+            b.End();
+        }
+
+        private static void AddPage(CustomUIBuilder b, Action<CustomUIBuilder> build)
+        {
+            b.BeginColumn(0f, TextAnchor.UpperLeft);
+            RectTransform page = b.CurrentContainer;
+            UiKit.FlexHeight(page, 1f, 790f);
+            UiKit.FlexWidth(page, 1f, 600f);
+            build(b);
+            b.End();
+            pageRoots.Add(page);
+        }
+
+        /// <summary>底部状态条：一枚状态灯 + 一句话。</summary>
+        private static void BuildStatusBar(CustomUIBuilder b)
+        {
+            b.BeginRow(9f, TextAnchor.MiddleLeft);
+            RectTransform bar = b.CurrentContainer;
+            UiKit.Height(bar, 30f);
+            UiKit.FillWidth(bar, 600f);
+
+            Image bg = bar.gameObject.AddComponent<Image>();
+            bg.sprite = UiSkin.Plate(8, 0.72f, 1);
+            bg.type = Image.Type.Sliced;
+            bg.color = new Color(0.13f, 0.11f, 0.18f, 0.55f);
+            bg.raycastTarget = false;
+
+            b.AddImage(UiSkin.Dot(), 9f, 9f, null);
+            statusDot = b.Last == null ? null : b.Last.image;
+            if (statusDot != null)
+            {
+                statusDot.color = UiSkin.Mute;
+                statusDot.raycastTarget = false;
+                statusDot.preserveAspect = true;
+            }
+
+            b.AddLabel(UiText.StatusReady);
+            statusText = b.Last;
+            if (statusText != null)
+            {
+                UiKit.FlexWidth(statusText, 1f, 200f);
+                UiKit.Height(statusText, 20f);
+                if (statusText.text != null)
+                {
+                    statusText.text.text = UiText.StatusReady;
+                    statusText.text.color = UiSkin.Dim;
+                    statusText.text.fontSize = 12.5f;
+                    statusText.text.enableAutoSizing = false;
+                    statusText.text.enableWordWrapping = false;
+                    statusText.text.alignment = TextAlignmentOptions.Left;
+                    statusText.text.overflowMode = TextOverflowModes.Ellipsis;
+                }
+            }
+
+            b.End();
         }
 
         private static void OnWindowClosed()
@@ -407,230 +840,504 @@ namespace HermitVoidGenerator
 
         // ================= 基础修改 =================
 
+        /// <summary>两张主卡片：左边目录/表单，右边规格/草稿。统一底色、圆角、内边距。</summary>
+        private static void Card(CustomUIBuilder b, Color tint)
+        {
+            CustomUIElement el = b.Last;
+            if (el == null)
+            {
+                return;
+            }
+            UiSkin.CardLook(el, tint);
+            if (!cards.Contains(el))
+            {
+                cards.Add(el);
+            }
+            UiKit.FlexHeight(el.Rect, 1f, 520f);
+            // 注意：这里绝不加 flexibleWidth。卡片是定宽容器，一旦允许被压缩，
+            // 卡内写死宽度的表单行就会顶出卡外、连带顶出窗口（右边那排编辑框就是这么跑出去的）。
+        }
+
+        /// <summary>开一条表单行（定宽定高，不靠父级推算）。</summary>
+        private static void BeginFormRow(CustomUIBuilder b, float width)
+        {
+            b.BeginRow(6f, TextAnchor.MiddleLeft);
+            UiKit.Height(b.CurrentContainer, 30f);
+            UiKit.Width(b.CurrentContainer, width);
+        }
+
+        private static CustomUIElement InputBox(CustomUIBuilder b, string value, float width)
+        {
+            b.AddInput("", value ?? "", null, null, null);
+            CustomUIElement input = b.Last;
+            if (input != null)
+            {
+                UiKit.Width(input, width);
+                UiKit.Height(input, 28f);
+            }
+            return input;
+        }
+
+        private static void WriteButton(CustomUIBuilder b, Action onClick, float width)
+        {
+            b.AddButton(UiText.BasicWrite, onClick, null);
+            CustomUIElement btn = b.Last;
+            if (btn == null)
+            {
+                return;
+            }
+            UiKit.Width(btn, width);
+            UiKit.Height(btn, 28f);
+            UiSkin.Ghost(btn);
+        }
+
+        /// <summary>小节标题：一根黄铜竖条 + 字距拉开的标题，右侧可以挂一个动作按钮。</summary>
+        private static void SectionLine(CustomUIBuilder b, string title, string actionLabel, Action action)
+        {
+            b.BeginRow(9f, TextAnchor.MiddleLeft);
+            UiKit.Height(b.CurrentContainer, 24f);
+            // 不写死宽度：左卡 692、右卡 400，跟着父级走才不会顶出面板
+            UiKit.Grow(b.CurrentContainer, 1f, 0f);
+
+            b.AddImage(UiSkin.White(), 3f, 13f, null);
+            CustomUIElement mark = b.Last;
+            if (mark != null)
+            {
+                if (mark.image != null)
+                {
+                    mark.image.color = UiSkin.Brass;
+                    mark.image.raycastTarget = false;
+                }
+                UiKit.Width(mark, 3f);
+                UiKit.Height(mark, 13f);
+            }
+
+            b.AddLabel(title);
+            CustomUIElement head = b.Last;
+            if (head != null)
+            {
+                UiSkin.Eyebrow(head);
+                UiKit.FlexWidth(head, 1f, 60f);
+                UiKit.Height(head, 20f);
+            }
+
+            if (action != null)
+            {
+                b.AddButton(actionLabel, action, null);
+                CustomUIElement btn = b.Last;
+                if (btn != null)
+                {
+                    UiKit.Width(btn, 84f);
+                    UiKit.Height(btn, 22f);
+                    if (btn.text != null)
+                    {
+                        btn.text.fontSize = 11.5f;
+                        btn.text.enableAutoSizing = false;
+                    }
+                    UiSkin.Ghost(btn);
+                }
+            }
+
+            b.End();
+        }
+
         private static void BuildBasicPane(CustomUIBuilder b)
         {
-            b.BeginRow(6f, TextAnchor.UpperLeft);
+            b.BeginRow(Gap, TextAnchor.UpperLeft);
+            UiKit.FlexHeight(b.CurrentContainer, 1f, 760f);
+            UiKit.FlexWidth(b.CurrentContainer, 1f, 600f);
 
-            // ---- 左：钱与账目 / 店铺 / 定价
-            b.BeginPanel(LeftW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddHeader(UiText.BasicMoney);
-            b.Last.SetPreferredSize(320f, 26f);
-            b.AddButton(UiText.BasicRefresh, OnRefreshBasic, null);
-            b.Last.SetPreferredSize(110f, 26f);
-            b.End();
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicCash);
-            b.Last.SetPreferredSize(60f, 30f);
-            b.AddInput("", BasicStats.CashText(), null, null, null);
-            bCash = b.Last;
-            bCash.SetPreferredSize(180f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteCash, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicRent);
-            b.Last.SetPreferredSize(60f, 30f);
-            b.AddInput("", BasicStats.RentText(), null, null, null);
-            bRent = b.Last;
-            bRent.SetPreferredSize(120f, 30f);
-            b.AddLabel(UiText.BasicDaysLeft);
-            b.Last.SetPreferredSize(80f, 30f);
-            b.AddInput("", BasicStats.RentDaysText(), null, null, null);
-            bRentDays = b.Last;
-            bRentDays.SetPreferredSize(70f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteRent, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicLoan);
-            b.Last.SetPreferredSize(60f, 30f);
-            b.AddInput("", BasicStats.LoanText(), null, null, null);
-            bLoan = b.Last;
-            bLoan.SetPreferredSize(120f, 30f);
-            b.AddLabel(UiText.BasicDaysLeft);
-            b.Last.SetPreferredSize(80f, 30f);
-            b.AddInput("", BasicStats.LoanDaysText(), null, null, null);
-            bLoanDays = b.Last;
-            bLoanDays.SetPreferredSize(70f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteLoan, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.AddSeparator(null, 6);
-
-            b.AddHeader(UiText.BasicStore);
-            b.Last.SetPreferredSize(320f, 26f);
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicAttr);
-            b.Last.SetPreferredSize(60f, 30f);
-            b.AddInput("", BasicStats.AttractText(), null, null, null);
-            bAttr = b.Last;
-            bAttr.SetPreferredSize(110f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteAttr, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.AddLabel(UiText.BasicProjector);
-            b.Last.SetPreferredSize(80f, 30f);
-            b.AddInput("", BasicStats.ProjectorText(), null, null, null);
-            bProjector = b.Last;
-            bProjector.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteProjector, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.AddSeparator(null, 6);
-
-            b.AddHeader(UiText.BasicPricing);
-            b.Last.SetPreferredSize(320f, 26f);
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicRetail);
-            b.Last.SetPreferredSize(90f, 30f);
-            b.AddInput("", BasicStats.RetailMarkupText(), null, null, null);
-            bRetail = b.Last;
-            bRetail.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteRetail, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicContraLow);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.AddInput("", BasicStats.ContrabandLowText(), null, null, null);
-            bContraLow = b.Last;
-            bContraLow.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteContraLow, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.AddLabel(UiText.BasicContraMid);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.AddInput("", BasicStats.ContrabandMidText(), null, null, null);
-            bContraMid = b.Last;
-            bContraMid.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteContraMid, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.AddSeparator(null, 6);
-
-            b.AddHeader(UiText.BasicRelation);
-            b.Last.SetPreferredSize(320f, 26f);
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicFavor);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.Last.SetTooltip("王尔德的恩惠（PlayerStore.wildFavor）。夜里找乔·王尔德买服务时优先拿它抵扣，不够的部分才从现金补。");
-            b.AddInput("", BasicStats.FavorText(), null, null, null);
-            bFavor = b.Last;
-            bFavor.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteFavor, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.AddLabel(UiText.BasicCommissary);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.Last.SetTooltip("配给站券余额（PlayerStore.commissaryData.redeemedCredit）。在配给站兑换配给券会累加到这里，配给站买东西只扣这个数。");
-            b.AddInput("", BasicStats.CommissaryCreditText(), null, null, null);
-            bCommissaryCred = b.Last;
-            bCommissaryCred.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteCommissaryCredit, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
-
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.BasicContraHigh);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.AddInput("", BasicStats.ContrabandHighText(), null, null, null);
-            bContraHigh = b.Last;
-            bContraHigh.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteContraHigh, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.AddLabel(UiText.BasicContraCrit);
-            b.Last.SetPreferredSize(110f, 30f);
-            b.AddInput("", BasicStats.ContrabandCriticalText(), null, null, null);
-            bContraCrit = b.Last;
-            bContraCrit.SetPreferredSize(90f, 30f);
-            b.AddButton(UiText.BasicWrite, OnWriteContraCrit, null);
-            b.Last.SetPreferredSize(70f, 30f);
-            b.End();
+            BuildBasicLeft(b);
+            BuildBasicRight(b);
 
             b.End();
+        }
 
-            // ---- 右：阵营声望 + 伤势
-            b.BeginPanel(RightW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
+        private static void BuildBasicLeft(CustomUIBuilder b)
+        {
+            b.BeginPanel(LeftW, -1f, TextAnchor.UpperLeft, 12, 7, null);
+            Card(b, UiSkin.CardTint);
 
-            b.AddHeader(UiText.BasicFactions);
-            b.Last.SetPreferredSize(InnerW, 26f);
+            // ---- 钱与账目
+            SectionLine(b, UiText.BasicMoney, UiText.BasicRefresh, OnRefreshBasic);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicCash, 96f, 28f);
+            bCash = InputBox(b, BasicStats.CashText(), 190f);
+            b.AddFlexibleSpace();
+            WriteButton(b, OnWriteCash, 56f);
+            b.End();
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicRent, 96f, 28f);
+            bRent = InputBox(b, BasicStats.RentText(), 110f);
+            UiKit.Caption(b, UiText.BasicDaysLeft, 76f, 28f);
+            bRentDays = InputBox(b, BasicStats.RentDaysText(), 64f);
+            b.AddFlexibleSpace();
+            WriteButton(b, OnWriteRent, 56f);
+            b.End();
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicLoan, 96f, 28f);
+            bLoan = InputBox(b, BasicStats.LoanText(), 110f);
+            UiKit.Caption(b, UiText.BasicDaysLeft, 76f, 28f);
+            bLoanDays = InputBox(b, BasicStats.LoanDaysText(), 64f);
+            b.AddFlexibleSpace();
+            WriteButton(b, OnWriteLoan, 56f);
+            b.End();
+
+            b.AddSpace(4f);
+            UiKit.Rule(b, LeftInner);
+
+            // ---- 店铺
+            SectionLine(b, UiText.BasicStore, null, null);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicAttr, 96f, 28f);
+            bAttr = InputBox(b, BasicStats.AttractText(), 110f);
+            WriteButton(b, OnWriteAttr, 56f);
+            b.AddSpace(22f);
+            UiKit.Caption(b, UiText.BasicProjector, 72f, 28f);
+            bProjector = InputBox(b, BasicStats.ProjectorText(), 110f);
+            WriteButton(b, OnWriteProjector, 56f);
+            b.End();
+
+            b.AddSpace(4f);
+            UiKit.Rule(b, LeftInner);
+
+            // ---- 定价加成
+            SectionLine(b, UiText.BasicPricing, null, null);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicRetail, 120f, 28f);
+            bRetail = InputBox(b, BasicStats.RetailMarkupText(), 110f);
+            WriteButton(b, OnWriteRetail, 56f);
+            b.AddFlexibleSpace();
+            UiKit.Caption(b, UiText.BasicContraLow, 120f, 28f);
+            bContraLow = InputBox(b, BasicStats.ContrabandLowText(), 110f);
+            WriteButton(b, OnWriteContraLow, 56f);
+            b.End();
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicContraMid, 120f, 28f);
+            bContraMid = InputBox(b, BasicStats.ContrabandMidText(), 110f);
+            WriteButton(b, OnWriteContraMid, 56f);
+            b.AddFlexibleSpace();
+            UiKit.Caption(b, UiText.BasicContraHigh, 120f, 28f);
+            bContraHigh = InputBox(b, BasicStats.ContrabandHighText(), 110f);
+            WriteButton(b, OnWriteContraHigh, 56f);
+            b.End();
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicContraCrit, 120f, 28f);
+            bContraCrit = InputBox(b, BasicStats.ContrabandCriticalText(), 110f);
+            WriteButton(b, OnWriteContraCrit, 56f);
+            b.AddFlexibleSpace();
+            b.End();
+
+            b.AddSpace(4f);
+            UiKit.Rule(b, LeftInner);
+
+            // ---- 恩惠与配给
+            SectionLine(b, UiText.BasicRelation, null, null);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicFavor, 96f, 28f);
+            bFavor = InputBox(b, BasicStats.FavorText(), 110f);
+            bFavor.SetTooltip("王尔德的恩惠（PlayerStore.wildFavor）。夜里找乔·王尔德买服务时优先拿它抵扣，不够的部分才从现金补。");
+            WriteButton(b, OnWriteFavor, 56f);
+            b.AddSpace(18f);
+            UiKit.Caption(b, UiText.BasicCommissary, 120f, 28f);
+            bCommissaryCred = InputBox(b, BasicStats.CommissaryCreditText(), 110f);
+            bCommissaryCred.SetTooltip("配给站券余额（PlayerStore.commissaryData.redeemedCredit）。在配给站兑换配给券会累加到这里，配给站买东西只扣这个数。");
+            WriteButton(b, OnWriteCommissaryCredit, 56f);
+            b.End();
+
+            // ---- 事件
+            BuildEventSection(b);
+
+            b.End();
+        }
+
+        // ==================== 事件触发 ====================
+
+        private static EventCatalog.Entry CurrentEvent()
+        {
+            if (eventEntries == null || eventEntries.Count == 0)
+            {
+                return null;
+            }
+            if (eventIndex < 0 || eventIndex >= eventEntries.Count)
+            {
+                return null;
+            }
+            return eventEntries[eventIndex];
+        }
+
+        /// <summary>事件区：下拉选游戏本体事件、看简介、填天数、一键塞进日历。</summary>
+        private static void BuildEventSection(CustomUIBuilder b)
+        {
+            b.AddSpace(4f);
+            UiKit.Rule(b, LeftInner);
+
+            SectionLine(b, UiText.BasicEvent, UiText.BasicEventRefresh, OnRefreshEventStatus);
+
+            eventEntries = EventCatalog.All();
+            if (eventEntries == null || eventEntries.Count == 0)
+            {
+                eventIndex = 0;
+                b.AddLabel(UiText.BasicEventNoSave);
+                CustomUIElement empty = b.Last;
+                if (empty != null)
+                {
+                    UiSkin.Note(empty);
+                    UiKit.Width(empty, LeftInner);
+                    UiKit.Height(empty, 24f);
+                }
+                return;
+            }
+            if (eventIndex < 0 || eventIndex >= eventEntries.Count)
+            {
+                eventIndex = 0;
+            }
+
+            List<string> labels = new List<string>(eventEntries.Count);
+            for (int i = 0; i < eventEntries.Count; i++)
+            {
+                labels.Add(EventCatalog.Label(eventEntries[i]));
+            }
+            EventCatalog.Entry current = CurrentEvent();
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Caption(b, UiText.BasicEventPick, 34f, 28f);
+
+            b.AddDropdown(labels, eventIndex, OnEventChanged, null);
+            bEventPick = b.Last;
+            if (bEventPick != null)
+            {
+                UiKit.Width(bEventPick, 312f);
+                UiKit.Height(bEventPick, 30f);
+            }
+
+            UiKit.Caption(b, UiText.BasicEventDays, 62f, 28f);
+            bEventDays = InputBox(b, current == null ? "1" : current.DefaultDays.ToString(), 56f);
+            if (bEventDays != null)
+            {
+                bEventDays.SetTooltip(UiText.BasicEventDaysHint);
+            }
+
+            b.AddFlexibleSpace();
+
+            b.AddButton(UiText.BasicEventTrigger, OnTriggerEvent, null);
+            CustomUIElement trigger = b.Last;
+            if (trigger != null)
+            {
+                UiKit.Width(trigger, 72f);
+                UiKit.Height(trigger, 30f);
+                UiSkin.Primary(trigger);
+            }
+            b.End();
+
+            b.AddLabel(EventCatalog.InfoText(current));
+            bEventInfo = b.Last;
+            if (bEventInfo != null)
+            {
+                UiSkin.Note(bEventInfo);
+                UiKit.Width(bEventInfo, LeftInner);
+                UiKit.Height(bEventInfo, 104f);
+            }
+
+            b.AddLabel(UiText.BasicEventActive + EventCatalog.ActiveSummary());
+            bEventLive = b.Last;
+            if (bEventLive != null)
+            {
+                UiKit.Width(bEventLive, LeftInner);
+                UiKit.Height(bEventLive, 18f);
+                if (bEventLive.text != null)
+                {
+                    bEventLive.text.color = UiSkin.Brass;
+                    bEventLive.text.fontSize = 11.5f;
+                    bEventLive.text.enableAutoSizing = false;
+                    bEventLive.text.enableWordWrapping = false;
+                    bEventLive.text.alignment = TextAlignmentOptions.Left;
+                    bEventLive.text.overflowMode = TextOverflowModes.Ellipsis;
+                }
+            }
+        }
+
+        private static void OnEventChanged(int index)
+        {
+            eventIndex = index;
+            EventCatalog.Entry entry = CurrentEvent();
+            if (entry == null)
+            {
+                return;
+            }
+            if (bEventDays != null)
+            {
+                bEventDays.SetString(entry.DefaultDays.ToString());
+            }
+            if (bEventInfo != null)
+            {
+                bEventInfo.SetText(EventCatalog.InfoText(entry));
+            }
+            SetBasicStatus(EventCatalog.Label(entry));
+        }
+
+        private static void OnTriggerEvent()
+        {
+            string message;
+            bool ok = EventCatalog.Trigger(CurrentEvent(), TextOf(bEventDays), out message);
+            ApplyBasic(ok ? null : message, message);
+            if (!ok)
+            {
+                return;
+            }
+            RefreshEventLive();
+        }
+
+        private static void OnRefreshEventStatus()
+        {
+            RefreshEventLive();
+            SetBasicStatus(EventCatalog.ActiveSummary());
+        }
+
+        private static void RefreshEventLive()
+        {
+            if (bEventLive != null)
+            {
+                bEventLive.SetText(UiText.BasicEventActive + EventCatalog.ActiveSummary());
+            }
+        }
+
+        private static void BuildBasicRight(CustomUIBuilder b)
+        {
+            b.BeginPanel(RightW, -1f, TextAnchor.UpperLeft, 12, 7, null);
+            Card(b, UiSkin.CardTintAlt);
+
+            // ---- 阵营声望
+            SectionLine(b, UiText.BasicFactions, null, null);
 
             List<BasicStats.FactionRow> factions = BasicStats.Factions();
-            if (factions.Count == 0)
+            if (factions == null || factions.Count == 0)
             {
                 b.AddLabel(UiText.BasicFactionNone);
-                b.Last.SetTextColor(DimColor);
-                b.Last.SetPreferredSize(InnerW, 24f);
+                CustomUIElement none = b.Last;
+                if (none != null)
+                {
+                    UiSkin.Note(none);
+                    UiKit.Width(none, RightInner);
+                    UiKit.Height(none, 26f);
+                }
             }
             else
             {
-                foreach (BasicStats.FactionRow faction in factions)
+                for (int i = 0; i < factions.Count; i++)
                 {
+                    BasicStats.FactionRow faction = factions[i];
                     string fid = faction.Id;
-                    b.BeginRow(6f, TextAnchor.MiddleLeft);
+
+                    BeginFormRow(b, RightInner);
+                    UiKit.Height(b.CurrentContainer, 28f);
+
                     b.AddLabel(faction.Name);
-                    b.Last.SetPreferredSize(96f, 28f);
-                    b.Last.SetTooltip(fid);
-                    b.AddInput("", BasicStats.RepText(fid), null, null, null);
-                    CustomUIElement repBox = b.Last;
-                    repBox.SetPreferredSize(62f, 28f);
+                    CustomUIElement name = b.Last;
+                    if (name != null)
+                    {
+                        UiSkin.Caption(name);
+                        UiKit.Width(name, 88f);
+                        UiKit.Height(name, 26f);
+                        name.SetTooltip(fid);
+                    }
+
+                    CustomUIElement repBox = InputBox(b, BasicStats.RepText(fid), 62f);
                     facInputs[fid] = repBox;
+
                     b.AddButton(UiText.BasicWrite, delegate { OnWriteRep(fid); }, null);
-                    b.Last.SetPreferredSize(56f, 28f);
+                    CustomUIElement btn = b.Last;
+                    if (btn != null)
+                    {
+                        UiKit.Width(btn, 44f);
+                        UiKit.Height(btn, 26f);
+                        if (btn.text != null)
+                        {
+                            btn.text.fontSize = 12f;
+                            btn.text.enableAutoSizing = false;
+                        }
+                        UiSkin.Ghost(btn);
+                    }
+
                     b.AddLabel(BasicStats.RepTierText(fid));
-                    b.Last.SetTextColor(DimColor);
-                    b.Last.SetPreferredSize(140f, 28f);
-                    facTiers[fid] = b.Last;
+                    CustomUIElement tier = b.Last;
+                    if (tier != null)
+                    {
+                        UiKit.Width(tier, RightInner - 216f);
+                        UiKit.Height(tier, 26f);
+                        if (tier.text != null)
+                        {
+                            tier.text.text = BasicStats.RepTierText(fid);
+                            tier.text.fontSize = 11.5f;
+                            tier.text.color = UiSkin.Mute;
+                            tier.text.enableAutoSizing = false;
+                            tier.text.enableWordWrapping = false;
+                            tier.text.alignment = TextAlignmentOptions.Right;
+                            tier.text.overflowMode = TextOverflowModes.Ellipsis;
+                        }
+                    }
+
+                    facTiers[fid] = tier;
                     b.End();
                 }
             }
 
-            b.AddSeparator(null, 6);
+            b.AddSpace(4f);
+            UiKit.Rule(b, RightInner);
 
-            b.AddHeader(UiText.BasicHealth);
-            b.Last.SetPreferredSize(InnerW, 26f);
+            // ---- 伤势
+            SectionLine(b, UiText.BasicHealth, null, null);
 
             woundIndex = BasicStats.WoundOptionIndex();
             woundStable = BasicStats.WoundStable();
+
             b.AddDropdown(BasicStats.WoundOptions, woundIndex, OnWoundChanged, null);
             bWound = b.Last;
-            bWound.SetPreferredSize(InnerW, 32f);
+            if (bWound != null)
+            {
+                UiKit.Width(bWound, RightInner);
+                UiKit.Height(bWound, 32f);
+            }
 
             b.AddToggle(UiText.BasicWoundStable, woundStable, OnWoundStableChanged, null);
             bWoundStable = b.Last;
-            bWoundStable.SetPreferredSize(InnerW, 28f);
-
-            b.AddButton(UiText.BasicWrite, OnWriteWound, null);
-            b.Last.SetPreferredSize(110f, 30f);
-
-            b.AddLabel("");
-            basicStatus = b.Last;
-            basicStatus.SetTextColor(StatusColor);
-            basicStatus.SetPreferredSize(InnerW, 32f);
-
-            b.AddSeparator(null, 6);
-
-            b.AddLabel(UiText.BasicHint);
-            b.Last.SetTextColor(DimColor);
-            b.Last.SetPreferredSize(InnerW, 130f);
-            if (b.Last.text != null)
+            if (bWoundStable != null)
             {
-                b.Last.text.enableWordWrapping = true;
-                b.Last.text.enableAutoSizing = true;
-                b.Last.text.fontSizeMin = 11f;
-                b.Last.text.fontSizeMax = 15f;
+                UiKit.Width(bWoundStable, RightInner);
+                UiKit.Height(bWoundStable, 28f);
             }
 
-            b.End();
+            b.AddButton(UiText.BasicWrite, OnWriteWound, null);
+            CustomUIElement woundBtn = b.Last;
+            if (woundBtn != null)
+            {
+                UiKit.Width(woundBtn, 120f);
+                UiKit.Height(woundBtn, 30f);
+                UiSkin.Ghost(woundBtn);
+            }
+
+            b.AddSpace(2f);
+            b.AddLabel(UiText.BasicHint);
+            CustomUIElement hint = b.Last;
+            if (hint != null)
+            {
+                UiSkin.Note(hint);
+                UiKit.Width(hint, RightInner);
+                UiKit.FlexHeight(hint.Rect, 1f, 96f);
+                if (hint.text != null)
+                {
+                    hint.text.text = UiText.BasicHint;
+                }
+            }
+
             b.End();
         }
 
@@ -689,9 +1396,7 @@ namespace HermitVoidGenerator
 
         private static void SetBasicStatus(string text)
         {
-            if (basicStatus == null) return;
-            basicStatus.SetText(text ?? "");
-            basicStatus.SetTextColor(StatusColor);
+            SetStatus(text);
         }
 
         private static void ApplyBasic(string error, string okText)
@@ -817,146 +1522,250 @@ namespace HermitVoidGenerator
 
         private static void BuildCreatePane(CustomUIBuilder b)
         {
-            b.BeginRow(6f, TextAnchor.UpperLeft);
+            b.BeginRow(Gap, TextAnchor.UpperLeft);
+            UiKit.FlexHeight(b.CurrentContainer, 1f, 520f);
+            UiKit.FlexWidth(b.CurrentContainer, 1f, 600f);
 
             // ---- 左：目录
-            b.BeginPanel(LeftW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
+            b.BeginPanel(LeftW, -1f, TextAnchor.UpperLeft, 12, 6, null);
+            Card(b, UiSkin.CardTint);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Height(b.CurrentContainer, 32f);
+
             b.AddInput(UiText.SearchHint, createFilter, null, null, OnSearchTyping);
-            b.Last.SetPreferredSize(300f, 32f);
+            CustomUIElement search = b.Last;
+            if (search != null)
+            {
+                UiKit.FlexWidth(search, 1f, 200f);
+                UiKit.Height(search, 32f);
+            }
+
             List<string> sectionOptions = BuildSectionOptions(createFilter, null, sectionMap);
             int sectionPos = sectionMap.IndexOf(createSectionIndex);
             b.AddDropdown(sectionOptions, sectionPos < 0 ? 0 : sectionPos, OnSectionChanged, null);
             createSectionDropdown = b.Last;
-            b.Last.SetPreferredSize(190f, 32f);
+            if (createSectionDropdown != null)
+            {
+                UiKit.Width(createSectionDropdown, 158f);
+                UiKit.Height(createSectionDropdown, 32f);
+            }
+
             List<string> groupOptions = BuildGroupOptions(createFilter, createSectionIndex, null, groupMap);
             int groupPos = groupMap.IndexOf(createGroupIndex);
             b.AddDropdown(groupOptions, groupPos < 0 ? 0 : groupPos, OnGroupChanged, null);
             createGroupDropdown = b.Last;
-            b.Last.SetPreferredSize(190f, 32f);
-            b.End();
+            if (createGroupDropdown != null)
+            {
+                UiKit.Width(createGroupDropdown, 158f);
+                UiKit.Height(createGroupDropdown, 32f);
+            }
 
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.ListHint);
-            b.Last.SetPreferredSize(LeftW - 148f, 18f);
             b.AddButton(UiText.RefreshCatalog, OnRefreshCatalog, null);
-            b.Last.SetPreferredSize(110f, 24f);
+            CustomUIElement refresh = b.Last;
+            if (refresh != null)
+            {
+                UiKit.Width(refresh, 84f);
+                UiKit.Height(refresh, 30f);
+                UiSkin.Ghost(refresh);
+            }
+
             b.End();
 
-            b.BeginScroll(584f);
+            b.AddLabel(UiText.ListHint);
+            CustomUIElement listHint = b.Last;
+            if (listHint != null)
+            {
+                UiKit.Width(listHint, LeftInner);
+                UiKit.Height(listHint, 16f);
+                if (listHint.text != null)
+                {
+                    listHint.text.text = UiText.ListHint;
+                    listHint.text.color = UiSkin.Mute;
+                    listHint.text.fontSize = 11.5f;
+                    listHint.text.enableAutoSizing = false;
+                    listHint.text.enableWordWrapping = false;
+                    listHint.text.alignment = TextAlignmentOptions.Left;
+                    listHint.text.overflowMode = TextOverflowModes.Ellipsis;
+                }
+            }
+
+            b.BeginScrollFlexible(240f);
+            UiKit.FlexWidth(b.Last, 1f, LeftInner);
             createGridHost = b.CurrentContainer;
             b.End();
 
-            b.AddLabel("");
-            createStatus = b.Last;
-            createStatus.SetTextColor(StatusColor);
-            createStatus.SetPreferredSize(LeftW - 20f, 36f);
             b.End();
 
-            // ---- 右：生成参数 + 规格
-            b.BeginPanel(RightW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
+            // ---- 右：草稿
+            b.BeginPanel(RightW, -1f, TextAnchor.UpperLeft, 12, 6, null);
+            Card(b, UiSkin.CardTintAlt);
 
             b.AddHeader(UiText.DraftNone);
             draftTitle = b.Last;
-            draftTitle.SetPreferredSize(RightW - 20f, 26f);
+            if (draftTitle != null)
+            {
+                UiKit.Width(draftTitle, RightInner);
+                UiKit.Height(draftTitle, 24f);
+            }
 
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.CountLabel);
-            b.Last.SetPreferredSize(40f, 30f);
-            b.AddInput("1", "1", null, null, null);
-            draftCount = b.Last;
-            draftCount.SetPreferredSize(70f, 30f);
-            b.AddLabel(UiText.PriceLabel);
-            b.Last.SetPreferredSize(150f, 30f);
-            b.AddInput("", "", null, null, null);
-            draftPrice = b.Last;
-            draftPrice.SetPreferredSize(110f, 30f);
+            BeginFormRow(b, RightInner);
+            UiKit.Caption(b, UiText.CountLabel, 40f, 28f);
+            draftCount = InputBox(b, "1", 64f);
+            b.AddSpace(12f);
+            UiKit.Caption(b, UiText.PriceLabel, 64f, 28f);
+            draftPrice = InputBox(b, "", 128f);
+            b.AddFlexibleSpace();
             b.End();
 
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
-            b.AddLabel(UiText.WhereLabel);
-            b.Last.SetPreferredSize(80f, 30f);
+            BeginFormRow(b, RightInner);
+            UiKit.Caption(b, UiText.WhereLabel, 64f, 28f);
             b.AddDropdown(UiText.SpawnTargets, whereIndex, OnWhereChanged, null);
             draftWhere = b.Last;
-            draftWhere.SetPreferredSize(140f, 30f);
+            if (draftWhere != null)
+            {
+                UiKit.Width(draftWhere, 150f);
+                UiKit.Height(draftWhere, 30f);
+            }
+            b.AddFlexibleSpace();
             b.AddButton(UiText.SpawnButton, OnSpawn, null);
-            b.Last.SetPreferredSize(100f, 30f);
+            CustomUIElement spawn = b.Last;
+            if (spawn != null)
+            {
+                UiKit.Width(spawn, 104f);
+                UiKit.Height(spawn, 30f);
+                UiSkin.Primary(spawn);
+            }
             b.End();
 
-            b.BeginScroll(548f);
+            b.AddSpace(4f);
+            UiKit.Rule(b, RightInner);
+            b.AddSpace(4f);
+
+            b.BeginScrollFlexible(200f);
+            UiKit.FlexWidth(b.Last, 1f, RightInner);
             createSpecHost = b.CurrentContainer;
             b.End();
 
             b.End();
+
             b.End();
         }
 
         private static void BuildEditPane(CustomUIBuilder b)
         {
-            b.BeginRow(6f, TextAnchor.UpperLeft);
+            b.BeginRow(Gap, TextAnchor.UpperLeft);
+            UiKit.FlexHeight(b.CurrentContainer, 1f, 520f);
+            UiKit.FlexWidth(b.CurrentContainer, 1f, 600f);
 
-            b.BeginPanel(LeftW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
+            // ---- 左：台面
+            b.BeginPanel(LeftW, -1f, TextAnchor.UpperLeft, 12, 6, null);
+            Card(b, UiSkin.CardTint);
+
+            BeginFormRow(b, LeftInner);
+            UiKit.Height(b.CurrentContainer, 30f);
+
             b.AddButton(UiText.RefreshStore, OnRefreshEdit, null);
-            b.Last.SetPreferredSize(110f, 32f);
+            CustomUIElement reload = b.Last;
+            if (reload != null)
+            {
+                UiKit.Width(reload, 96f);
+                UiKit.Height(reload, 30f);
+                UiSkin.Ghost(reload);
+            }
+
             b.AddButton(UiText.PickButton, OnPick, null);
-            b.Last.SetPreferredSize(110f, 32f);
+            CustomUIElement pick = b.Last;
+            if (pick != null)
+            {
+                UiKit.Width(pick, 96f);
+                UiKit.Height(pick, 30f);
+                UiSkin.Ghost(pick);
+            }
+
             b.AddToggle(UiText.IncludeStore, includeStore, OnIncludeStoreChanged, null);
             editIncludeStore = b.Last;
-            b.Last.SetPreferredSize(220f, 32f);
+            if (editIncludeStore != null)
+            {
+                UiKit.FlexWidth(editIncludeStore, 1f, 180f);
+                UiKit.Height(editIncludeStore, 30f);
+            }
             b.End();
 
-            // 搜索 + 大/小分类：和生成页同一套，只是筛的是台面上这几件
-            b.BeginRow(6f, TextAnchor.MiddleLeft);
+            BeginFormRow(b, LeftInner);
+            UiKit.Height(b.CurrentContainer, 32f);
+
             b.AddInput(UiText.EditSearchHint, editFilter, null, null, OnEditSearchTyping);
             editSearch = b.Last;
-            b.Last.SetPreferredSize(300f, 32f);
+            if (editSearch != null)
+            {
+                UiKit.FlexWidth(editSearch, 1f, 200f);
+                UiKit.Height(editSearch, 32f);
+            }
+
             List<string> editSectionOptions = BuildSectionOptions(editFilter, EditIds(), editSectionMap);
             int editSectionPos = editSectionMap.IndexOf(editSectionIndex);
             b.AddDropdown(editSectionOptions, editSectionPos < 0 ? 0 : editSectionPos, OnEditSectionChanged, null);
             editSectionDropdown = b.Last;
-            b.Last.SetPreferredSize(190f, 32f);
+            if (editSectionDropdown != null)
+            {
+                UiKit.Width(editSectionDropdown, 158f);
+                UiKit.Height(editSectionDropdown, 32f);
+            }
+
             List<string> editGroupOptions = BuildGroupOptions(editFilter, editSectionIndex, EditIds(), editGroupMap);
             int editGroupPos = editGroupMap.IndexOf(editGroupIndex);
             b.AddDropdown(editGroupOptions, editGroupPos < 0 ? 0 : editGroupPos, OnEditGroupChanged, null);
             editGroupDropdown = b.Last;
-            b.Last.SetPreferredSize(190f, 32f);
+            if (editGroupDropdown != null)
+            {
+                UiKit.Width(editGroupDropdown, 158f);
+                UiKit.Height(editGroupDropdown, 32f);
+            }
             b.End();
 
             b.AddLabel("");
             editInfo = b.Last;
-            editInfo.SetTextColor(DimColor);
-            editInfo.SetPreferredSize(LeftW - 20f, 18f);
+            if (editInfo != null)
+            {
+                UiKit.Width(editInfo, LeftInner);
+                UiKit.Height(editInfo, 16f);
+                if (editInfo.text != null)
+                {
+                    editInfo.text.color = UiSkin.Cyan;
+                    editInfo.text.fontSize = 11.5f;
+                    editInfo.text.enableAutoSizing = false;
+                    editInfo.text.enableWordWrapping = false;
+                    editInfo.text.alignment = TextAlignmentOptions.Left;
+                    editInfo.text.overflowMode = TextOverflowModes.Ellipsis;
+                }
+            }
 
-            b.BeginScroll(508f);
+            b.BeginScrollFlexible(200f);
+            UiKit.FlexWidth(b.Last, 1f, LeftInner);
             editGridHost = b.CurrentContainer;
             b.End();
 
-            b.AddLabel("");
-            editStatus = b.Last;
-            editStatus.SetTextColor(StatusColor);
-            editStatus.SetPreferredSize(LeftW - 20f, 36f);
             b.End();
 
-            b.BeginPanel(RightW, PaneH, TextAnchor.UpperLeft, 8f, 4f);
-            // 表单区不套滚动：内容多高就多高，三个按钮永远在最下面露着
-            b.BeginColumn();
+            // ---- 右：编辑表单
+            b.BeginPanel(RightW, -1f, TextAnchor.UpperLeft, 12, 6, null);
+            Card(b, UiSkin.CardTintAlt);
+
+            b.BeginColumn(4f, TextAnchor.UpperLeft);
             editFormHost = b.CurrentContainer;
-            if (editFormHost != null)
-            {
-                LayoutElement formLayout = editFormHost.GetComponent<LayoutElement>();
-                if (formLayout == null)
-                {
-                    formLayout = editFormHost.gameObject.AddComponent<LayoutElement>();
-                }
-                formLayout.flexibleWidth = 1f;
-                formLayout.flexibleHeight = 0f;
-            }
+            UiKit.FlexWidth(editFormHost, 1f, RightInner);
             b.End();
+
             b.BeginScrollFlexible(200f);
             editSpecScroll = b.Last;
+            if (editSpecScroll != null)
+            {
+                UiKit.FlexWidth(editSpecScroll, 1f, 240f);
+            }
             editSpecHost = b.CurrentContainer;
             b.End();
+
             b.End();
 
             b.End();
@@ -1218,71 +2027,101 @@ namespace HermitVoidGenerator
         private static void AddTile(CustomUIBuilder b, string tooltip, string label, bool selected, Action onClick, List<CellRef> cells)
         {
             b.BeginColumn(2f, TextAnchor.UpperCenter);
-            RectTransform cellRoot = b.CurrentContainer;
+            RectTransform cell = b.CurrentContainer;
+            UiKit.Width(cell, CellW);
+            UiKit.Height(cell, CellH);
+            UiKit.Tune(cell, 6, 6, 10, 6, 2f);
 
-            b.AddImage((Sprite)null, 56f, 56f);
-            CustomUIElement image = b.Last;
-            image.SetImageColor(selected ? Color.white : IconDim);
-            if (image.image != null)
+            // 整格底衬：九宫格圆角，悬停会亮一档；点击和 tooltip 都挂在它身上，
+            // 图标和文字一律不吃射线，免得挡在最上面把点击吞掉。
+            CellClickHandler handler = AddCellChrome(cell, selected, tooltip);
+            if (handler != null)
             {
-                image.image.raycastTarget = true;
-                image.image.preserveAspect = true;
-            }
-            image.SetTooltip(tooltip);
-            if (image.root != null)
-            {
-                CellClickHandler handler = image.root.AddComponent<CellClickHandler>();
                 handler.onLeftClick = onClick;
+            }
+
+            UiKit.IconWell(cell, 66f, new Color(0f, 0f, 0f, 0.3f));
+
+            b.AddImage((Sprite)null, 56f, 56f, null);
+            CustomUIElement image = b.Last;
+            if (image != null)
+            {
+                if (image.image != null)
+                {
+                    image.image.raycastTarget = false;
+                    image.image.preserveAspect = true;
+                }
+                image.SetImageColor(Color.white);
             }
 
             b.AddLabel(label ?? "");
             CustomUIElement text = b.Last;
-            StyleCellLabel(text);
-            text.SetTooltip(tooltip);
-            if (selected)
+            if (text != null)
             {
-                text.SetTextColor(CellSelected);
+                StyleCellLabel(text, selected);
+                if (text.text != null)
+                {
+                    text.text.raycastTarget = false;
+                    text.text.text = label ?? "";
+                }
             }
 
             b.End();
 
-            AddCellGlow(cellRoot, selected);
-
             if (cells != null)
             {
-                CellRef cell = new CellRef();
-                cell.Id = tooltip;
-                cell.Image = image;
-                cell.Label = text;
-                cells.Add(cell);
+                cells.Add(new CellRef
+                {
+                    Id = tooltip,
+                    Image = image,
+                    Label = text,
+                    Handler = handler
+                });
             }
         }
 
-        /// <summary>格子底衬：贴着图标的方块，未选中是淡淡一层，选中是金色光晕。只衬在图标后面，不遮挡图片本身。</summary>
-        private static void AddCellGlow(RectTransform cell, bool selected)
+        /// <summary>格子底衬并挂上点击/悬停处理，返回挂好组件的 handler。</summary>
+        private static CellClickHandler AddCellChrome(RectTransform cell, bool selected, string tooltip)
         {
             if (cell == null)
             {
-                return;
+                return null;
             }
 
-            GameObject go = new GameObject("ds_cell_glow", typeof(RectTransform), typeof(Image));
+            GameObject go = new GameObject("ds_cell_plate", typeof(RectTransform), typeof(Image));
             RectTransform rt = go.GetComponent<RectTransform>();
             rt.SetParent(cell, false);
             rt.SetSiblingIndex(0);
-            rt.anchorMin = new Vector2(0.5f, 1f);
-            rt.anchorMax = new Vector2(0.5f, 1f);
-            rt.pivot = new Vector2(0.5f, 1f);
-            float size = selected ? 64f : 60f;
-            rt.sizeDelta = new Vector2(size, size);
-            rt.anchoredPosition = new Vector2(0f, selected ? -2f : -4f);
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.offsetMin = new Vector2(1f, 1f);
+            rt.offsetMax = new Vector2(-1f, -1f);
 
             LayoutElement le = go.AddComponent<LayoutElement>();
             le.ignoreLayout = true;
 
             Image img = go.GetComponent<Image>();
-            img.color = selected ? CellGlow : CellNormal;
-            img.raycastTarget = false;
+            if (img == null)
+            {
+                return null;
+            }
+            img.sprite = UiSkin.Plate(9, 0.72f, 1);
+            img.type = Image.Type.Sliced;
+            img.color = selected ? UiSkin.TileTintOn : UiSkin.TileTint;
+            img.raycastTarget = true;
+
+            CellClickHandler handler = go.AddComponent<CellClickHandler>();
+            handler.plate = img;
+            handler.tintNormal = selected ? UiSkin.TileTintOn : UiSkin.TileTint;
+            handler.tintHover = selected ? UiSkin.TileTintOnHover : UiSkin.TileTintHover;
+
+            if (!string.IsNullOrEmpty(tooltip))
+            {
+                CustomUITooltipTrigger trigger = go.AddComponent<CustomUITooltipTrigger>();
+                trigger.tooltipText = tooltip;
+            }
+            return handler;
         }
 
         /// <summary>文字自动适配：长标签自动换行并在 9~原字号之间缩小，避免撑破右栏。</summary>
@@ -1292,6 +2131,8 @@ namespace HermitVoidGenerator
             {
                 return;
             }
+            // 规格面板、编辑表单是运行时才重建的，这里顺手把游戏自带的 header / button 再统一一次样式
+            UiSkin.Polish(host);
             try
             {
                 TextMeshProUGUI[] texts = host.GetComponentsInChildren<TextMeshProUGUI>(true);
@@ -1320,21 +2161,24 @@ namespace HermitVoidGenerator
             }
         }
 
-        private static void StyleCellLabel(CustomUIElement el)
+        private static void StyleCellLabel(CustomUIElement el, bool selected)
         {
-            if (el == null || !el.IsAlive)
+            if (el == null)
             {
                 return;
             }
             if (el.text != null)
             {
                 el.text.alignment = TextAlignmentOptions.Center;
-                el.text.enableWordWrapping = false;
-                el.text.fontSizeMax = 14f;
-                el.text.fontSizeMin = 1f;
+                el.text.enableWordWrapping = true;
                 el.text.enableAutoSizing = true;
+                el.text.fontSizeMax = 12f;
+                el.text.fontSizeMin = 8f;
+                el.text.lineSpacing = 0f;
+                el.text.color = selected ? UiSkin.Brass : UiSkin.Bone;
+                el.text.overflowMode = TextOverflowModes.Ellipsis;
             }
-            el.SetPreferredSize(CellW - 10f, 20f);
+            el.SetPreferredSize(CellW - 10f, 30f);
         }
 
         private static void StartIcons(List<CellRef> cells)
@@ -1400,15 +2244,23 @@ namespace HermitVoidGenerator
                     cell.Label.SetText(Shorten(Catalog.NameOf(cell.Id), 18));
                 }
 
-                // 图标探针顺带抓到游戏原文描述，挪上去就能看到 id 下面那段说明
+                // 图标探针顺带抓到游戏原文描述，挂到整格底衬上（图标/文字不吃射线，否则会吞掉点击）
                 string tip = TileTooltip(cell.Id);
-                if (cell.Label != null && cell.Label.IsAlive)
+                if (cell.Handler != null)
                 {
-                    cell.Label.SetTooltip(tip);
+                    CustomUITooltipTrigger trigger = cell.Handler.GetComponent<CustomUITooltipTrigger>();
+                    if (trigger != null)
+                    {
+                        trigger.tooltipText = tip;
+                    }
                 }
-                if (cell.Image != null && cell.Image.IsAlive)
+                if (cell.Label != null && cell.Label.IsAlive && cell.Label.text != null)
                 {
-                    cell.Image.SetTooltip(tip);
+                    cell.Label.text.raycastTarget = false;
+                }
+                if (cell.Image != null && cell.Image.IsAlive && cell.Image.image != null)
+                {
+                    cell.Image.image.raycastTarget = false;
                 }
 
                 Sprite icon = Catalog.IconOf(cell.Id);
@@ -3012,10 +3864,13 @@ namespace HermitVoidGenerator
     }
 
     /// <summary>格子上的点击回调（左键选中 / 右键备用）。</summary>
-    internal sealed class CellClickHandler : MonoBehaviour, IPointerClickHandler
+    internal sealed class CellClickHandler : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
     {
         public Action onLeftClick;
         public Action onRightClick;
+        public Image plate;
+        public Color tintNormal;
+        public Color tintHover;
 
         public void OnPointerClick(PointerEventData eventData)
         {
@@ -3036,6 +3891,22 @@ namespace HermitVoidGenerator
                 {
                     onRightClick();
                 }
+            }
+        }
+
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            if (plate != null)
+            {
+                plate.color = tintHover;
+            }
+        }
+
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            if (plate != null)
+            {
+                plate.color = tintNormal;
             }
         }
     }
