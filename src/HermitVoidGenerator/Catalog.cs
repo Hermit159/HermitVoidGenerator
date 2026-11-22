@@ -9,56 +9,25 @@ namespace HermitVoidGenerator
     {
         private static bool loaded;
         private static List<string> ids = new List<string>();
-        private static List<string> groupClasses = new List<string>();
         private static List<string> groupLabels = new List<string> { "全部分类" };
         private static readonly Dictionary<string, string> names = new Dictionary<string, string>();
         private static Dictionary<string, int[]> groupOf;
         private static readonly Dictionary<string, Sprite> icons = new Dictionary<string, Sprite>();
         private static readonly Dictionary<string, string> descs = new Dictionary<string, string>();
 
-        // 两级分类：wiki 大分类（17 个）→ 小分类（42 个）。一件物品可以挂在多个小分类下。
+        // 分类只有一层：游戏里悬停显示的那个标签本身（厨刀 = 武器 + 近战武器 + 日用品，
+        // 所以它在三个标签下都出现）。大类那层已经拆掉。
+        // sectionLabels / groupSection 留着是为了 Query / InFilter 的签名不变，实际只有「全部」这一项。
         public const string SectionAll = "全部大类";
-        public const string SectionGameDir = "游戏目录";
         private static List<string> sectionLabels = new List<string> { SectionAll };
         private static List<int> groupSection = new List<int> { 0 };
 
-        // 游戏里挂着 GameItem 的目录类（GetDictionaryClassNameList 的返回值），
-        // 去掉 ItemDirectory / Directory 后缀后就是 key。
-        private static readonly Dictionary<string, string> GroupZh = new Dictionary<string, string>
-        {
-            { "Amenities", "生活用品" }, { "Armor", "护甲" }, { "Audio", "音频" },
-            { "CombatAbilityEffectPermanent", "战斗效果·永久" },
-            { "CombatAbilityEffectInstant", "战斗效果·即时" },
-            { "CombatAbilityEffectStandard", "战斗效果·标准" },
-            { "Character", "角色" }, { "Construction", "建材" }, { "Container", "容器" }, { "Drop", "掉落物" },
-            { "DropTableFourniture", "家具掉落表" }, { "DropTable", "掉落表" },
-            { "Equipment", "装备" }, { "Explosive", "爆炸物" }, { "Food", "食品" },
-            { "Furniture", "家具" }, { "GunMod", "枪械配件" }, { "Guns", "枪械" },
-            { "Husbandry", "养殖" }, { "Hydroponic", "水培" }, { "Key", "钥匙" },
-            { "Material", "材料" }, { "MeleeWeapon", "近战武器" }, { "Misc", "杂项" },
-            { "Meds", "药品" }, { "Mod", "改装件" }, { "Module", "模块" },
-            { "NpcCharacter", "NPC 角色" }, { "Organ", "器官" }, { "Perk", "天赋" },
-            { "PlayerCharacter", "玩家角色" }, { "PlayerAbility", "玩家能力" },
-            { "RuinedMachine", "报废机器" }, { "Ship", "飞船" }, { "ShipSystem", "飞船系统" },
-            { "StandardCombatAbility", "战斗能力" }, { "TechnicianBackpack", "技师背包" },
-            { "Tool", "工具" }, { "Unused", "未使用" }, { "Wine", "酒" },
-            // 兜底（版本变了也不会露出英文）
-            { "Weapon", "武器" }, { "Clothing", "衣物" }, { "Toy", "玩具" },
-            { "Book", "书籍" }, { "Media", "影音" }, { "Drug", "药品" },
-            { "Drink", "饮品" }, { "Trinket", "小玩意" }, { "Component", "零件" },
-            { "Part", "零件" }, { "Ammo", "弹药" }, { "Attachment", "配件" },
-            { "Cyber", "义体" }, { "Junk", "破烂" }, { "Currency", "通货" },
-            { "Blueprint", "图纸" }, { "Paint", "涂装" }, { "Decor", "装饰" },
-            { "Art", "艺术品" }, { "Gem", "宝石" }, { "Seed", "种子" },
-            { "Plant", "植物" }, { "Fish", "鱼" },
-        };
+        // 分类来源：游戏里悬停物品显示的那串标签（ItemTypeProbe 现读 itemTypes）。
+        // 一件物品有几个标签就挂几个分组；一个标签都没有的，统一进「无标签」那一组。
+        private static Dictionary<string, int> tagGroupIndex;
+        private static readonly Dictionary<string, string> tagLabels = new Dictionary<string, string>(StringComparer.Ordinal);
+        private static int untaggedGroup;
 
-        // 分类顺序：先走 wiki 百科的大/小分类（见 WikiCategories.g.cs），wiki 没收录的物品
-        // 退回游戏自己的目录类。两套都算不出来才不归组。
-        private static Dictionary<string, string[]> wikiSubs;
-        private static Dictionary<string, int> wikiGroupIndex;
-        private static List<int> dirIndex;
-        private static readonly Dictionary<string, int> dirOf = new Dictionary<string, int>(StringComparer.Ordinal);
 
         public static int Count { get { Ensure(); return ids.Count; } }
         public static List<string> GroupLabels { get { Ensure(); return groupLabels; } }
@@ -85,8 +54,10 @@ namespace HermitVoidGenerator
             loaded = true;
             groupOf = null;
             ids = new List<string>();
-            groupClasses = new List<string>();
             groupLabels = new List<string> { "全部分类" };
+            sectionLabels = new List<string> { SectionAll };
+            groupSection = new List<int> { 0 };
+            tagLabels.Clear();
 
             try
             {
@@ -113,169 +84,109 @@ namespace HermitVoidGenerator
                 Log.Error("读取物品目录失败: " + e.Message);
             }
 
-            try
-            {
-                List<string> classes = DirectoryMaster.GetDictionaryClassNameList<GameItem>();
-                if (classes != null)
-                {
-                    for (int i = 0; i < classes.Count; i++)
-                    {
-                        string className = classes[i];
-                        if (string.IsNullOrEmpty(className) || LabelFor(className).Length == 0)
-                        {
-                            continue;
-                        }
-                        if (!groupClasses.Contains(className))
-                        {
-                            groupClasses.Add(className);
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Log.Error("读取物品分类失败: " + e.Message);
-            }
-
             BuildGroups();
+            ItemTypeProbe.Dump(ids);
 
-            Log.Info("目录已加载: " + ids.Count + " 件物品 / " + sectionLabels.Count + " 个大类 / " + groupLabels.Count + " 个小类（wiki " + WikiCategories.ItemCount + " 条分类关系）");
+            Log.Info("目录已加载: " + ids.Count + " 件物品 / " + (groupLabels.Count - 1) + " 个标签（悬停标签探针读过 " + ItemTypeProbe.ProbedCount + " 件）");
         }
 
-        /// <summary>分类标签表：wiki 小分类在前（按 wiki 百科大小类顺序，只留真有物品的），游戏目录分类兜底在后。</summary>
+        /// <summary>
+        /// 分类表：一层，就是游戏里悬停显示的那串标签。顺序照 ItemTagFamilies 的手工顺序来
+        /// （常用的排在前面），没登记的新标签按字母排在后面。一个标签都没有的物品统一进「无标签」。
+        /// </summary>
         private static void BuildGroups()
         {
-            wikiSubs = new Dictionary<string, string[]>(StringComparer.Ordinal);
-            wikiGroupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-            dirIndex = new List<int>(groupClasses.Count);
-            dirOf.Clear();
+            tagGroupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            untaggedGroup = 0;
             groupOf = null;
 
-            HashSet<string> usedSubs = new HashSet<string>(StringComparer.Ordinal);
+            // 1) 本目录里实际出现过的标签（其余标签不占下拉位置）。
+            //    标签从游戏里现读：造探针物品读 itemTypes，静态表只作兜底。
+            ItemTypeProbe.Prewarm(ids);
+            HashSet<string> usedTags = new HashSet<string>(StringComparer.Ordinal);
+            bool anyUntagged = false;
             for (int i = 0; i < ids.Count; i++)
             {
-                string[] subs = WikiCategories.SubsOfItem(ids[i]);
-                if (subs == null || subs.Length == 0)
+                string[] tags = ItemTypeProbe.Of(ids[i]);
+                if (tags.Length == 0)
                 {
+                    anyUntagged = true;
                     continue;
                 }
-                wikiSubs[ids[i]] = subs;
-                for (int j = 0; j < subs.Length; j++)
+                for (int j = 0; j < tags.Length; j++)
                 {
-                    usedSubs.Add(subs[j]);
+                    usedTags.Add(tags[j]);
                 }
             }
 
-            // 1) wiki 小分类，按百科的大类顺序逐节铺开；空小节不进下拉
-            for (int s = 0; s < WikiCategories.Sections.Length; s++)
+            // 2) 先按 ItemTagFamilies 的声明顺序排，剩下没登记的新标签按字母排在后面
+            List<string> ordered = new List<string>();
+            string[] sections = ItemTagFamilies.Sections;
+            for (int s = 0; s < sections.Length; s++)
             {
-                string section = WikiCategories.Sections[s];
-                string[] subs = WikiCategories.SubsOfSection(section);
-                int secIndex = 0;
-                for (int k = 0; k < subs.Length; k++)
+                string[] tags = ItemTagFamilies.TagsOfSection(sections[s]);
+                for (int k = 0; k < tags.Length; k++)
                 {
-                    string sub = subs[k];
-                    if (string.IsNullOrEmpty(sub) || !usedSubs.Contains(sub))
+                    if (usedTags.Contains(tags[k]))
                     {
-                        continue;
+                        ordered.Add(tags[k]);
+                        usedTags.Remove(tags[k]);
                     }
-                    if (secIndex == 0)
-                    {
-                        secIndex = sectionLabels.Count;
-                        sectionLabels.Add(section);
-                    }
-                    wikiGroupIndex[sub] = groupLabels.Count;
-                    groupLabels.Add(sub);
-                    groupSection.Add(secIndex);
                 }
             }
-
-            // 2) 游戏目录类兜底：只收 wiki 完全没收录的物品
-            int dirSection = 0;
-            for (int i = 0; i < groupClasses.Count; i++)
+            if (usedTags.Count > 0)
             {
-                List<string> members = IdentifiersOf(groupClasses[i]);
-                bool used = false;
-                for (int j = 0; j < members.Count && !used; j++)
-                {
-                    string id = members[j];
-                    used = !string.IsNullOrEmpty(id) && ids.Contains(id) && !wikiSubs.ContainsKey(id);
-                }
-                if (!used)
-                {
-                    dirIndex.Add(0);
-                    continue;
-                }
+                List<string> rest = new List<string>(usedTags);
+                rest.Sort(StringComparer.Ordinal);
+                ordered.AddRange(rest);
+            }
 
-                if (dirSection == 0)
-                {
-                    dirSection = sectionLabels.Count;
-                    sectionLabels.Add(SectionGameDir);
-                }
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                tagGroupIndex[ordered[i]] = groupLabels.Count;
+                groupLabels.Add(TagLabel(ordered[i]));
+                groupSection.Add(0);
+            }
 
-                string label = LabelFor(groupClasses[i]);
-                if (groupLabels.Contains(label))
-                {
-                    // 和 wiki 分类撞名（工具、材料这类），退到括号里区分
-                    label += "（其他）";
-                }
-                int index = groupLabels.Count;
-                dirIndex.Add(index);
-                groupLabels.Add(label);
-                groupSection.Add(dirSection);
-                for (int j = 0; j < members.Count; j++)
-                {
-                    string id = members[j];
-                    if (!string.IsNullOrEmpty(id) && !dirOf.ContainsKey(id))
-                    {
-                        dirOf[id] = index;
-                    }
-                }
+            // 3) 游戏里根本不给标签的物品：合成一个「无标签」组，不再按目录类细分
+            if (anyUntagged)
+            {
+                untaggedGroup = groupLabels.Count;
+                groupLabels.Add(ItemTagFamilies.SectionUntagged);
+                groupSection.Add(0);
             }
         }
 
-        private static string LabelFor(string className)
+        /// <summary>标签的中文显示名：先向游戏要（本地化表 type_* 词条），拿不到再退 ItemTagFamilies 的兜底表。</summary>
+        private static string TagLabel(string tag)
         {
-            if (string.IsNullOrEmpty(className))
+            string cached;
+            if (tagLabels.TryGetValue(tag, out cached))
             {
-                return "";
+                return cached;
             }
 
-            string key = className;
-            if (key.EndsWith("ItemDirectory"))
-            {
-                key = key.Substring(0, key.Length - "ItemDirectory".Length);
-            }
-            else if (key.EndsWith("Directory"))
-            {
-                key = key.Substring(0, key.Length - "Directory".Length);
-            }
-
-            string zh;
-            if (GroupZh.TryGetValue(key, out zh))
-            {
-                return zh;
-            }
-            // 没登记的目录类也不让它露出英文
-            return "其他物品";
-        }
-
-        private static List<string> IdentifiersOf(string className)
-        {
-            List<string> list = new List<string>();
+            string label = "";
             try
             {
-                List<string> raw = DirectoryMaster.GetIdentifierList<GameItem>(className);
-                if (raw != null)
-                {
-                    list.AddRange(raw);
-                }
+                label = TypeHelper.GetTypeDisplayName(tag);
             }
             catch
             {
-                // 分类名失效时退回"全部分类"，不影响主流程
+                label = "";
             }
-            return list;
+
+            if (string.IsNullOrEmpty(label) || label.IndexOf("type_", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                label = ItemTagFamilies.ZhOf(tag);
+            }
+            if (string.IsNullOrEmpty(label))
+            {
+                label = tag;
+            }
+
+            tagLabels[tag] = label;
+            return label;
         }
 
         /// <summary>按大类 / 小类筛选。groupIndex &gt; 0 时按小类，否则按 sectionIndex 筛整个大类（0 = 全部）。</summary>
@@ -348,28 +259,21 @@ namespace HermitVoidGenerator
                 string id = ids[i];
                 buffer.Clear();
 
-                // wiki 小分类优先，一件物品可以命中多个（植皮罗非鱼卵 = 食品 + 动物）
-                string[] subs;
-                if (wikiSubs != null && wikiSubs.TryGetValue(id, out subs))
+                // 一件物品有几个悬停标签就挂几个小类（厨刀 = 武器 + 近战武器 + 日用品）
+                string[] tags = ItemTypeProbe.Of(id);
+                for (int j = 0; j < tags.Length; j++)
                 {
-                    for (int j = 0; j < subs.Length; j++)
+                    int index;
+                    if (tagGroupIndex != null && tagGroupIndex.TryGetValue(tags[j], out index) && !buffer.Contains(index))
                     {
-                        int index;
-                        if (wikiGroupIndex.TryGetValue(subs[j], out index) && !buffer.Contains(index))
-                        {
-                            buffer.Add(index);
-                        }
+                        buffer.Add(index);
                     }
                 }
 
-                // wiki 没收录才退到游戏目录类
-                if (buffer.Count == 0)
+                // 一个标签都没有：统一挂到「无标签」那一组
+                if (buffer.Count == 0 && untaggedGroup > 0)
                 {
-                    int dir;
-                    if (dirOf.TryGetValue(id, out dir) && dir > 0)
-                    {
-                        buffer.Add(dir);
-                    }
+                    buffer.Add(untaggedGroup);
                 }
 
                 groupOf[id] = buffer.ToArray();
@@ -420,7 +324,7 @@ namespace HermitVoidGenerator
             return counts;
         }
 
-        /// <summary>按当前搜索词统计每个大分类里有几件。长度同 SectionLabels，[0] 是全部。</summary>
+        /// <summary>大类已经拆掉了，只剩「全部」这一项；返回长度 1 的数组，[0] 是命中件数。</summary>
         public static int[] SectionCounts(string text)
         {
             return SectionCounts(null, text);
@@ -430,48 +334,9 @@ namespace HermitVoidGenerator
         public static int[] SectionCounts(IList<string> subset, string text)
         {
             Ensure();
-            Dictionary<string, int[]> map = GroupMap();
+            int[] groups = GroupCounts(subset, text);
             int[] counts = new int[sectionLabels.Count];
-            string filter = (text ?? "").Trim();
-            int total = subset == null ? ids.Count : subset.Count;
-            List<int> seen = new List<int>();
-            for (int i = 0; i < total; i++)
-            {
-                string id = subset == null ? ids[i] : subset[i];
-                if (string.IsNullOrEmpty(id))
-                {
-                    continue;
-                }
-                if (filter.Length > 0 && !Matches(id, filter))
-                {
-                    continue;
-                }
-                counts[0]++;
-                int[] groups;
-                if (!map.TryGetValue(id, out groups))
-                {
-                    continue;
-                }
-                seen.Clear();
-                for (int j = 0; j < groups.Length; j++)
-                {
-                    int g = groups[j];
-                    if (g <= 0 || g >= groupSection.Count)
-                    {
-                        continue;
-                    }
-                    int s = groupSection[g];
-                    if (s <= 0 || seen.Contains(s))
-                    {
-                        continue;
-                    }
-                    seen.Add(s);
-                    if (s < counts.Length)
-                    {
-                        counts[s]++;
-                    }
-                }
-            }
+            counts[0] = groups[0];
             return counts;
         }
 
@@ -493,6 +358,17 @@ namespace HermitVoidGenerator
             {
                 string guess = ItemNames.Zh(id);
                 if (!string.IsNullOrEmpty(guess) && guess.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            // 悬停标签也参与搜索：搜「违禁」能捞出所有违禁品，搜「近战」能捞出所有近战武器
+            string[] tags = ItemTypeProbe.Of(id);
+            for (int i = 0; i < tags.Length; i++)
+            {
+                string label = TagLabel(tags[i]);
+                if (label.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     return true;
                 }
@@ -586,6 +462,62 @@ namespace HermitVoidGenerator
         public static bool HasName(string id)
         {
             return !string.IsNullOrEmpty(id) && names.ContainsKey(id);
+        }
+
+        /// <summary>一件物品的悬停标签（中文名），顺序和游戏里一样；没有标签返回空数组。</summary>
+        public static string[] TagsOf(string id)
+        {
+            Ensure();
+            string[] tags = ItemTypeProbe.Of(id);
+            if (tags.Length == 0)
+            {
+                return tags;
+            }
+
+            string[] labels = new string[tags.Length];
+            for (int i = 0; i < tags.Length; i++)
+            {
+                labels[i] = TagLabel(tags[i]);
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// 复刻游戏悬停的那行标签：每个标签写成 [中文名]，用的颜色也照游戏来
+        /// （CommonTooltipHelper.CreateItemTypeTooltip：常规浅青，违禁品整行浅红）。
+        /// 没有标签返回空串。
+        /// </summary>
+        public static string TagHint(string id)
+        {
+            Ensure();
+            string[] tags = ItemTypeProbe.Of(id);
+            if (tags.Length == 0)
+            {
+                return "";
+            }
+
+            bool contraband = false;
+            for (int i = 0; i < tags.Length; i++)
+            {
+                if (string.Equals(tags[i], "CONTRABAND", StringComparison.Ordinal))
+                {
+                    contraband = true;
+                    break;
+                }
+            }
+
+            string text = "";
+            for (int i = 0; i < tags.Length; i++)
+            {
+                if (i > 0)
+                {
+                    text += " ";
+                }
+                text += "[" + TagLabel(tags[i]) + "]";
+            }
+
+            string color = ((int)(contraband ? RenderHandler.ColorPalette.LightRed : RenderHandler.ColorPalette.LightCyan)).ToString("X6");
+            return "<color=#" + color + ">" + text + "</color>";
         }
 
         /// <summary>取图标。临时造一个实例取 sprite，然后连子物品一起销毁。</summary>

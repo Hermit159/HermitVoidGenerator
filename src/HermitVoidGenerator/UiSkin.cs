@@ -25,11 +25,14 @@ namespace HermitVoidGenerator
         /// <summary>正文暖白。</summary>
         public static readonly Color Bone = Col(0xE7, 0xE1, 0xD2, 1f);
 
-        /// <summary>说明文字。</summary>
-        public static readonly Color Dim = Col(0x9A, 0x94, 0xA6, 1f);
+        /// <summary>墨色：黄铜底上的字（主按钮、选中的格子）。</summary>
+        public static readonly Color Ink = Col(0x1A, 0x14, 0x24, 1f);
 
-        /// <summary>最弱一级：占位、脚注。</summary>
-        public static readonly Color Mute = Col(0x6E, 0x69, 0x7B, 1f);
+        /// <summary>说明文字（字段名、次级按钮、状态行）。深紫底上对比度约 8:1，别往下调。</summary>
+        public static readonly Color Dim = Col(0xC6, 0xBF, 0xD6, 1f);
+
+        /// <summary>最弱一级：占位、脚注。比正文弱一档但仍能一眼看清，对比度约 4.5:1。</summary>
+        public static readonly Color Mute = Col(0xA5, 0x9E, 0xB8, 1f);
 
         public static readonly Color Ok = Col(0x8F, 0xD1, 0x8A, 1f);
         public static readonly Color Warn = Col(0xF0, 0xB4, 0x63, 1f);
@@ -356,7 +359,7 @@ namespace HermitVoidGenerator
             }
             if (el.text != null)
             {
-                el.text.color = Col(0x1A, 0x14, 0x24, 1f);
+                el.text.color = Ink;
                 el.text.fontSize = 13f;
                 el.text.enableAutoSizing = false;
                 el.text.fontStyle = FontStyles.Bold;

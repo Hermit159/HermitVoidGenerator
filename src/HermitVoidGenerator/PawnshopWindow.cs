@@ -33,7 +33,8 @@ namespace HermitVoidGenerator
         private const float CellH = 126f;
         private const int MaxCells = 160;
 
-        private static readonly Color DimColor = new Color(0.604f, 0.580f, 0.651f, 1f);
+        // 说明文字一律跟着皮肤走，别再在这里写死一份
+        private static Color DimColor { get { return UiSkin.Dim; } }
 
         private static CustomUIWindow window;
 
@@ -60,15 +61,11 @@ namespace HermitVoidGenerator
         private static CustomUIElement draftWhere;
 
         private static CustomUIElement createGroupDropdown;
-        private static CustomUIElement createSectionDropdown;
         private static readonly List<int> groupMap = new List<int>();
-        private static readonly List<int> sectionMap = new List<int>();
         private static bool groupLock;
-        private static bool sectionLock;
 
         private static string createFilter = "";
         private static int createGroupIndex;
-        private static int createSectionIndex;
         private static string selectedId = "";
         private static GameItem draft;
         private static int whereIndex;
@@ -92,11 +89,8 @@ namespace HermitVoidGenerator
 
         private static CustomUIElement editGroupDropdown;
         private static CustomUIElement editSearch;
-        private static CustomUIElement editSectionDropdown;
         private static readonly List<int> editGroupMap = new List<int>();
-        private static readonly List<int> editSectionMap = new List<int>();
         private static bool editGroupLock;
-        private static bool editSectionLock;
 
         private static CustomUIElement fCount;
         private static CustomUIElement fValue;
@@ -105,7 +99,6 @@ namespace HermitVoidGenerator
 
         private static string editFilter = "";
         private static int editGroupIndex;
-        private static int editSectionIndex;
         private static bool includeStore;
 
         // ---- 基础修改页
@@ -1541,23 +1534,14 @@ namespace HermitVoidGenerator
                 UiKit.Height(search, 32f);
             }
 
-            List<string> sectionOptions = BuildSectionOptions(createFilter, null, sectionMap);
-            int sectionPos = sectionMap.IndexOf(createSectionIndex);
-            b.AddDropdown(sectionOptions, sectionPos < 0 ? 0 : sectionPos, OnSectionChanged, null);
-            createSectionDropdown = b.Last;
-            if (createSectionDropdown != null)
-            {
-                UiKit.Width(createSectionDropdown, 158f);
-                UiKit.Height(createSectionDropdown, 32f);
-            }
-
-            List<string> groupOptions = BuildGroupOptions(createFilter, createSectionIndex, null, groupMap);
+            // 分类只有一层：游戏标签。没有大类下拉。
+            List<string> groupOptions = BuildGroupOptions(createFilter, null, groupMap);
             int groupPos = groupMap.IndexOf(createGroupIndex);
             b.AddDropdown(groupOptions, groupPos < 0 ? 0 : groupPos, OnGroupChanged, null);
             createGroupDropdown = b.Last;
             if (createGroupDropdown != null)
             {
-                UiKit.Width(createGroupDropdown, 158f);
+                UiKit.Width(createGroupDropdown, 200f);
                 UiKit.Height(createGroupDropdown, 32f);
             }
 
@@ -1703,23 +1687,13 @@ namespace HermitVoidGenerator
                 UiKit.Height(editSearch, 32f);
             }
 
-            List<string> editSectionOptions = BuildSectionOptions(editFilter, EditIds(), editSectionMap);
-            int editSectionPos = editSectionMap.IndexOf(editSectionIndex);
-            b.AddDropdown(editSectionOptions, editSectionPos < 0 ? 0 : editSectionPos, OnEditSectionChanged, null);
-            editSectionDropdown = b.Last;
-            if (editSectionDropdown != null)
-            {
-                UiKit.Width(editSectionDropdown, 158f);
-                UiKit.Height(editSectionDropdown, 32f);
-            }
-
-            List<string> editGroupOptions = BuildGroupOptions(editFilter, editSectionIndex, EditIds(), editGroupMap);
+            List<string> editGroupOptions = BuildGroupOptions(editFilter, EditIds(), editGroupMap);
             int editGroupPos = editGroupMap.IndexOf(editGroupIndex);
             b.AddDropdown(editGroupOptions, editGroupPos < 0 ? 0 : editGroupPos, OnEditGroupChanged, null);
             editGroupDropdown = b.Last;
             if (editGroupDropdown != null)
             {
-                UiKit.Width(editGroupDropdown, 158f);
+                UiKit.Width(editGroupDropdown, 200f);
                 UiKit.Height(editGroupDropdown, 32f);
             }
             b.End();
@@ -1780,19 +1754,6 @@ namespace HermitVoidGenerator
             RefreshCreateList();
         }
 
-        private static void OnSectionChanged(int index)
-        {
-            if (sectionLock)
-            {
-                return;
-            }
-            createSectionIndex = index >= 0 && index < sectionMap.Count ? sectionMap[index] : 0;
-            // 换了大类，小类回到「全部小类」
-            createGroupIndex = 0;
-            RebuildGroupOptions();
-            RefreshCreateList();
-        }
-
         private static void OnGroupChanged(int index)
         {
             if (groupLock)
@@ -1814,67 +1775,27 @@ namespace HermitVoidGenerator
 
         private static void RebuildFilterOptions()
         {
-            RebuildSectionOptions();
             RebuildGroupOptions();
         }
 
-        /// <summary>大类下拉：全部分类 + 17 个 wiki 大类（没货的不出），括号里是当前搜索命中的件数。subset 非空时只数里面的 id（编辑页只数台面上那几件）。</summary>
-        private static List<string> BuildSectionOptions(string filter, IList<string> subset, List<int> map)
+        /// <summary>分类下拉：直接列游戏标签，括号里是当前搜索命中的件数。同一件物品可能同时挂在几个标签下。subset 非空时只数里面的 id（编辑页只数台面上那几件）。</summary>
+        private static List<string> BuildGroupOptions(string filter, IList<string> subset, List<int> map)
         {
             List<string> labels = new List<string>();
             map.Clear();
 
             int[] counts;
-            try
-            {
-                counts = Catalog.SectionCounts(subset, filter);
-            }
-            catch (Exception e)
-            {
-                Log.Warn("统计大类数量失败: " + e.Message);
-                counts = new int[] { subset == null ? Catalog.Count : subset.Count };
-            }
-
-            labels.Add(UiText.SectionAll + " (" + counts[0] + ")");
-            map.Add(0);
-
-            List<string> all = Catalog.SectionLabels;
-            for (int i = 1; i < counts.Length && i < all.Count; i++)
-            {
-                if (counts[i] <= 0)
-                {
-                    continue;
-                }
-                labels.Add(all[i] + " (" + counts[i] + ")");
-                map.Add(i);
-            }
-            return labels;
-        }
-
-        /// <summary>小类下拉：只列当前大类下的小类；同一件物品可能同时出现在几个小类里。subset 非空时只数里面的 id。</summary>
-        private static List<string> BuildGroupOptions(string filter, int sectionIndex, IList<string> subset, List<int> map)
-        {
-            List<string> labels = new List<string>();
-            map.Clear();
-
-            int[] counts;
-            int total;
             try
             {
                 counts = Catalog.GroupCounts(subset, filter);
-                int[] sectionCounts = Catalog.SectionCounts(subset, filter);
-                total = sectionIndex > 0 && sectionIndex < sectionCounts.Length
-                    ? sectionCounts[sectionIndex]
-                    : counts[0];
             }
             catch (Exception e)
             {
                 Log.Warn("统计分类数量失败: " + e.Message);
                 counts = new int[] { subset == null ? Catalog.Count : subset.Count };
-                total = counts[0];
             }
 
-            labels.Add(UiText.GroupAll + " (" + total + ")");
+            labels.Add(UiText.GroupAll + " (" + counts[0] + ")");
             map.Add(0);
 
             List<string> all = Catalog.GroupLabels;
@@ -1884,54 +1805,16 @@ namespace HermitVoidGenerator
                 {
                     continue;
                 }
-                if (sectionIndex > 0 && Catalog.SectionOfGroup(i) != sectionIndex)
-                {
-                    continue;
-                }
                 labels.Add(all[i] + " (" + counts[i] + ")");
                 map.Add(i);
             }
             return labels;
         }
 
-        /// <summary>把新选项塞进大类下拉；当前选中项被筛掉了就回到「全部大类」。</summary>
-        private static void ReloadSectionOptions(CustomUIElement dropdown, List<int> map, ref int index, ref bool lockFlag, string filter, IList<string> subset)
+        /// <summary>搜索词变了以后重建分类下拉：只剩有货的标签，标题后面跟着匹配数量。</summary>
+        private static void ReloadGroupOptions(CustomUIElement dropdown, List<int> map, ref int index, ref bool lockFlag, string filter, IList<string> subset)
         {
-            List<string> labels = BuildSectionOptions(filter, subset, map);
-
-            int pos = map.IndexOf(index);
-            if (pos < 0)
-            {
-                index = 0;
-                pos = 0;
-            }
-
-            if (dropdown == null || !dropdown.IsAlive)
-            {
-                return;
-            }
-
-            bool previous = lockFlag;
-            lockFlag = true;
-            try
-            {
-                dropdown.SetOptions(labels);
-                dropdown.SetIndex(pos);
-            }
-            catch (Exception e)
-            {
-                Log.Warn("刷新大类下拉失败: " + e.Message);
-            }
-            finally
-            {
-                lockFlag = previous;
-            }
-        }
-
-        /// <summary>搜索词 / 大类变了以后重建小类下拉：只剩有货的小类，标题后面跟着匹配数量。</summary>
-        private static void ReloadGroupOptions(CustomUIElement dropdown, List<int> map, ref int index, ref bool lockFlag, string filter, int sectionIndex, IList<string> subset)
-        {
-            List<string> labels = BuildGroupOptions(filter, sectionIndex, subset, map);
+            List<string> labels = BuildGroupOptions(filter, subset, map);
 
             int pos = map.IndexOf(index);
             if (pos < 0)
@@ -1962,22 +1845,16 @@ namespace HermitVoidGenerator
             }
         }
 
-        private static void RebuildSectionOptions()
-        {
-            ReloadSectionOptions(createSectionDropdown, sectionMap, ref createSectionIndex, ref sectionLock, createFilter, null);
-        }
-
         private static void RebuildGroupOptions()
         {
-            ReloadGroupOptions(createGroupDropdown, groupMap, ref createGroupIndex, ref groupLock, createFilter, createSectionIndex, null);
+            ReloadGroupOptions(createGroupDropdown, groupMap, ref createGroupIndex, ref groupLock, createFilter, null);
         }
 
-        /// <summary>编辑页：台面物品变了（换页 / 勾选含店内库存 / 刷新）时，两个下拉的件数要跟着重算。</summary>
+        /// <summary>编辑页：台面物品变了（换页 / 勾选含店内库存 / 刷新）时，分类下拉的件数要跟着重算。</summary>
         private static void RebuildEditFilterOptions()
         {
             List<string> ids = EditIds();
-            ReloadSectionOptions(editSectionDropdown, editSectionMap, ref editSectionIndex, ref editSectionLock, editFilter, ids);
-            ReloadGroupOptions(editGroupDropdown, editGroupMap, ref editGroupIndex, ref editGroupLock, editFilter, editSectionIndex, ids);
+            ReloadGroupOptions(editGroupDropdown, editGroupMap, ref editGroupIndex, ref editGroupLock, editFilter, ids);
         }
 
         private static void OnWhereChanged(int index)
@@ -1996,7 +1873,7 @@ namespace HermitVoidGenerator
             CustomUIBuilder.ClearContainer(createGridHost);
             CustomUIBuilder b = new CustomUIBuilder(CustomUIManager.Instance, window, createGridHost);
 
-            List<string> ids = Catalog.Query(createFilter, createSectionIndex, createGroupIndex);
+            List<string> ids = Catalog.Query(createFilter, 0, createGroupIndex);
             int shown = ids.Count > MaxCells ? MaxCells : ids.Count;
             List<CellRef> cells = new List<CellRef>(shown);
 
@@ -2172,10 +2049,11 @@ namespace HermitVoidGenerator
                 el.text.alignment = TextAlignmentOptions.Center;
                 el.text.enableWordWrapping = true;
                 el.text.enableAutoSizing = true;
-                el.text.fontSizeMax = 12f;
-                el.text.fontSizeMin = 8f;
+                el.text.fontSizeMax = 13f;
+                el.text.fontSizeMin = 9f;
                 el.text.lineSpacing = 0f;
-                el.text.color = selected ? UiSkin.Brass : UiSkin.Bone;
+                // 选中的格子底色是黄铜，字必须转墨色才看得清
+                el.text.color = selected ? UiSkin.Ink : UiSkin.Bone;
                 el.text.overflowMode = TextOverflowModes.Ellipsis;
             }
             el.SetPreferredSize(CellW - 10f, 30f);
@@ -2277,10 +2155,18 @@ namespace HermitVoidGenerator
             iconRoutine = null;
         }
 
-        /// <summary>格子提示：第一行是英文 id，空一行接游戏原本的描述（有风味文本再加一行）。</summary>
+        /// <summary>
+        /// 格子提示：第一行英文 id，空一行是游戏里的悬停标签（[武器] [近战武器] [日用品]，颜色照游戏），
+        /// 再空一行接游戏原本的描述（有风味文本再加一行）。
+        /// </summary>
         private static string TileTooltip(string id)
         {
             string tip = id ?? "";
+            string tags = Catalog.TagHint(id);
+            if (tags.Length > 0)
+            {
+                tip = tip + "\n\n" + tags;
+            }
             string desc = Catalog.DescOf(id);
             if (desc.Length > 0)
             {
@@ -3128,22 +3014,6 @@ namespace HermitVoidGenerator
                 b.End();
             }
 
-            List<string> unrated = Tags.Unrated(item);
-            if (unrated.Count > 0)
-            {
-                List<string> shown = new List<string>();
-                for (int i = 0; i < unrated.Count; i++)
-                {
-                    string zh = TagLabels.Name(unrated[i]);
-                    shown.Add(string.IsNullOrEmpty(zh) ? unrated[i] : zh);
-                }
-
-                string text = UiText.TagUnrated + " " + string.Join("、", shown.ToArray());
-                b.AddLabel(text);
-                b.Last.SetTextColor(DimColor);
-                b.Last.SetPreferredSize(InnerW, Mathf.Max(44f, 20f * Mathf.CeilToInt(text.Length / 20f)));
-                b.Last.SetTooltip(string.Join("\u000A", unrated.ToArray()));
-            }
         }
 
         private static void ApplyTag(GameItem item, TagRow row, string text, Action refresh)
@@ -3322,19 +3192,6 @@ namespace HermitVoidGenerator
             RefreshEditList();
         }
 
-        private static void OnEditSectionChanged(int index)
-        {
-            if (editSectionLock)
-            {
-                return;
-            }
-            editSectionIndex = index >= 0 && index < editSectionMap.Count ? editSectionMap[index] : 0;
-            // 换了大类，小类回到「全部小类」
-            editGroupIndex = 0;
-            RebuildEditGroupOptions();
-            RefreshEditList();
-        }
-
         private static void OnEditGroupChanged(int index)
         {
             if (editGroupLock)
@@ -3347,7 +3204,7 @@ namespace HermitVoidGenerator
 
         private static void RebuildEditGroupOptions()
         {
-            ReloadGroupOptions(editGroupDropdown, editGroupMap, ref editGroupIndex, ref editGroupLock, editFilter, editSectionIndex, EditIds());
+            ReloadGroupOptions(editGroupDropdown, editGroupMap, ref editGroupIndex, ref editGroupLock, editFilter, EditIds());
         }
 
         /// <summary>点选进来的物品要是被当前筛选挡住，就把筛选清掉——选中了却在列表里看不见很难受。</summary>
@@ -3362,13 +3219,12 @@ namespace HermitVoidGenerator
             {
                 return;
             }
-            if (Catalog.InFilter(id, editFilter, editSectionIndex, editGroupIndex))
+            if (Catalog.InFilter(id, editFilter, 0, editGroupIndex))
             {
                 return;
             }
 
             editFilter = "";
-            editSectionIndex = 0;
             editGroupIndex = 0;
             if (editSearch != null && editSearch.IsAlive)
             {
@@ -3413,14 +3269,14 @@ namespace HermitVoidGenerator
                 {
                     continue;
                 }
-                if (Catalog.InFilter(id, editFilter, editSectionIndex, editGroupIndex))
+                if (Catalog.InFilter(id, editFilter, 0, editGroupIndex))
                 {
                     shown.Add(item);
                 }
             }
 
             GameItem current = ItemEditor.Target;
-            bool filtered = editFilter.Length > 0 || editSectionIndex > 0 || editGroupIndex > 0;
+            bool filtered = editFilter.Length > 0 || editGroupIndex > 0;
 
             if (shown.Count == 0)
             {

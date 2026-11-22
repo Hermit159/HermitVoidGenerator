@@ -14,11 +14,10 @@ namespace HermitVoidGenerator
         public const string Footer = "Insert 开关面板 · 生成时先点左边的物品，再在右边填参数 · 规格改动即时生效";
 
         // ---- 左栏（目录 / 台面）
-        public const string SearchHint = "输入物品 ID 或名称筛选…";
+        public const string SearchHint = "输入物品名称或分类标签名";
         public const string RefreshCatalog = "刷新目录";
-        public const string EmptyList = "没有匹配的物品。换个关键词，或者把大/小分类切回全部。";
-        public const string GroupAll = "全部小类";
-        public const string SectionAll = "全部大类";
+        public const string EmptyList = "没有匹配的物品。换个关键词，或者把分类切回全部。";
+        public const string GroupAll = "全部分类";
         public const string ListHint = "左键点一件物品 → 右侧填生成参数";
 
         // ---- 生成页右栏
@@ -68,8 +67,8 @@ namespace HermitVoidGenerator
         public const string RefreshStore = "刷新台面";
         public const string NoTarget = "未选中物品 —— 在左边点一件，或者用「点选物品」在世界里点。";
         public const string NoStoreItems = "（前台、后柜台、展示柜上都没有东西）";
-        public const string EditSearchHint = "在台面物品里按 ID / 名称筛…";
-        public const string EditEmptyList = "台面上没有匹配的物品。换个关键词，或者把大/小分类切回全部。";
+        public const string EditSearchHint = "输入物品名称或分类标签名";
+        public const string EditEmptyList = "台面上没有匹配的物品。换个关键词，或者把分类切回全部。";
         public const string EditListHint = "左键点一件 → 右侧改它";
         public const string EmptyItemTitle = "还没有选中物品";
         public const string EditTitle = "物品信息";
@@ -94,7 +93,6 @@ namespace HermitVoidGenerator
         public const string TagTitle = "物品词条";
         public const string TagHint = "这件物品身上带着的所有词条。改动点「写入」立刻生效。";
         public const string TagNone = "这件物品身上没有可编辑的词条";
-        public const string TagUnrated = "另有这些词条类型未知，只能看不能改：";
         public const string TagWrite = "写入";
         public const string DurTitle = "耐久";
         public const string DurCurrent = "当前";
